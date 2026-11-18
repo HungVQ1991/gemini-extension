@@ -232,6 +232,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 4. Interface Enhancements
   setupToggle({
+    id: "folder-upload-toggle",
+    storageKey: "folderUploadEnabled",
+    defaultOn: true,
+    enableMsg: "ENABLE_FOLDER_UPLOAD",
+    disableMsg: "DISABLE_FOLDER_UPLOAD"
+  });
+
+  setupToggle({
     id: "export-btn-toggle",
     storageKey: "showExportButton",
     defaultOn: true,

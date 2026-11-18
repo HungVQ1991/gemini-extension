@@ -7589,6 +7589,16 @@ function handleRuntimeMessage(e) {
     case "DISABLE_WIDE_CHAT":
       isWideChatEnabled = !1, updateWideChatClass(), injectHeaderButtons();
       break;
+    case "ENABLE_FOLDER_UPLOAD":
+      isFolderUploadEnabled = !0;
+      injectFolderUploadButton();
+      initFolderDragDrop();
+      break;
+    case "DISABLE_FOLDER_UPLOAD":
+      isFolderUploadEnabled = !1;
+      const _fub = document.getElementById("sg-folder-upload-btn");
+      _fub && _fub.remove();
+      break;
     case "SHOW_WIDE_BTN":
       isWideChatButtonEnabled = !0, injectHeaderButtons();
       break;
@@ -16113,3 +16123,365 @@ chrome.storage.sync.remove(["focusShortcut"]), setTimeout(() => {
     })
   } catch (e) {}
 }();
+
+
+/* ==========================================================================
+   MODULE: FOLDER UPLOADER (Smart Context Bundler & Directory Reader)
+   ========================================================================== */
+let isFolderUploadEnabled = true;
+
+function shouldIgnorePath(path) {
+  if (!path) return true;
+  const normalized = path.replace(/\\/g, "/");
+
+  const ignoredDirs = [
+    "/node_modules/", "/.git/", "/dist/", "/build/", "/out/", "/.next/", "/.nuxt/",
+    "/__pycache__/", "/.vscode/", "/.idea/", "/vendor/", "/target/", "/bin/",
+    "/obj/", "/coverage/", "/.turbo/", "/.svelte-kit/", "/.cache/"
+  ];
+  if (ignoredDirs.some(d => normalized.includes(d) || normalized.startsWith(d.slice(1)))) {
+    return true;
+  }
+
+  const baseName = normalized.split("/").pop().toLowerCase();
+  if (
+    baseName.startsWith(".env") || 
+    baseName.endsWith(".pem") || 
+    baseName.endsWith(".key") || 
+    baseName === "id_rsa" ||
+    baseName.endsWith(".pfx") ||
+    baseName.endsWith(".keystore")
+  ) {
+    return true;
+  }
+
+  const binaryExts = [
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp",
+    ".mp4", ".mp3", ".wav", ".ogg", ".webm", ".avi", ".mov",
+    ".zip", ".tar", ".gz", ".7z", ".rar",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".iso",
+    ".pdf", ".docx", ".xlsx", ".pptx",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".pyc", ".class", ".jar", ".wasm"
+  ];
+  if (binaryExts.some(ext => baseName.endsWith(ext))) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildDirectoryTree(paths) {
+  const sorted = [...paths].sort();
+  return sorted.map(p => `- ${p}`).join("\n");
+}
+
+async function readFileSystemEntryRecursively(entry, path = "") {
+  if (entry.isFile) {
+    return new Promise(resolve => {
+      entry.file(f => {
+        f.relativePath = path + f.name;
+        resolve([f]);
+      }, () => resolve([]));
+    });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await new Promise(resolve => {
+      const all = [];
+      const readNext = () => {
+        reader.readEntries(results => {
+          if (!results || !results.length) return resolve(all);
+          all.push(...results);
+          readNext();
+        }, () => resolve(all));
+      };
+      readNext();
+    });
+    const subFiles = await Promise.all(
+      entries.map(e => readFileSystemEntryRecursively(e, path + entry.name + "/"))
+    );
+    return subFiles.flat();
+  }
+  return [];
+}
+
+async function attachFileToGeminiInput(file) {
+  _sgBlockFilePicker();
+  const r = [
+    'button[aria-label="Open upload file menu"]',
+    'button[aria-label="Open input area menu to select tools and upload types"]',
+    'button[aria-label="More options for input"]',
+    'button[data-test-id="uploader-button"]',
+    'button[data-test-id="input-area-menu-button"]'
+  ];
+  let s = null;
+  for (const e of r) {
+    s = document.querySelector(e);
+    if (s) break;
+  }
+  if (!s) {
+    const e = domQuery("inputAreaContainer");
+    s = e && e.querySelector('button:has(mat-icon[fonticon="plus"])') || document.querySelector('button:has(mat-icon[fonticon="plus"])');
+  }
+  if (!s) {
+    const text = await file.text();
+    setPromptText(text);
+    return false;
+  }
+
+  ensureAttachMenuHideStyle();
+  document.body.classList.add("sg-hiding-attach-menu");
+  const a = () => document.body.classList.remove("sg-hiding-attach-menu");
+  const i = setTimeout(a, 5000);
+
+  s.click();
+  await new Promise(e => setTimeout(e, 250));
+
+  const l = [
+    '[data-test-id="local-images-files-uploader-button"]',
+    'button[aria-label^="Upload files" i]',
+    'menu-item[aria-label="Upload files"]',
+    'button[aria-label="Upload files"]',
+    'menu-item[aria-label^="Upload file" i]',
+    '[role="menuitem"][aria-label^="Upload file" i]'
+  ];
+  let c = null;
+  for (const e of l) {
+    c = document.querySelector(e);
+    if (c) break;
+  }
+  if (!c) {
+    document.body.click();
+    clearTimeout(i);
+    a();
+    const text = await file.text();
+    setPromptText(text);
+    return false;
+  }
+
+  c.click();
+  await new Promise(e => setTimeout(e, 400));
+
+  const d = document.querySelector('input[type="file"][data-sg-intercepted="true"]') ||
+            document.querySelector('input[type="file"][name="Filedata"]') ||
+            document.querySelector('input[type="file"]');
+
+  if (!d) {
+    clearTimeout(i);
+    a();
+    const text = await file.text();
+    setPromptText(text);
+    return false;
+  }
+
+  const u = new DataTransfer();
+  u.items.add(file);
+  d.files = u.files;
+  d.dispatchEvent(new Event("change", { bubbles: true }));
+  d.dispatchEvent(new Event("input", { bubbles: true }));
+  document.body.click();
+  clearTimeout(i);
+  a();
+
+  await new Promise(e => setTimeout(e, 1500));
+  if (d.hasAttribute("data-sg-intercepted")) d.removeAttribute("data-sg-intercepted");
+  return true;
+}
+
+async function processAndUploadFolder(files, customFolderName = "") {
+  if (!files || !files.length) return;
+
+  let folderName = customFolderName;
+  if (!folderName) {
+    const first = files[0].webkitRelativePath || files[0].relativePath || "";
+    folderName = first.split("/")[0] || "project";
+  }
+
+  showToast(`Scanning folder "${folderName}"...`, "info");
+
+  const validFiles = [];
+  for (const file of files) {
+    const path = file.webkitRelativePath || file.relativePath || file.name;
+    if (shouldIgnorePath(path)) continue;
+    if (file.size > 500 * 1024) continue;
+    validFiles.push(file);
+  }
+
+  if (!validFiles.length) {
+    showToast(`No readable code or text files found in "${folderName}".`, "error");
+    return;
+  }
+
+  const filesToBundle = validFiles.slice(0, 300);
+  showToast(`Bundling ${filesToBundle.length} files from "${folderName}"...`, "info");
+
+  const paths = filesToBundle.map(f => f.webkitRelativePath || f.relativePath || f.name);
+  const treeStr = buildDirectoryTree(paths);
+
+  let bundle = `================================================================================\n`;
+  bundle += `📁 PROJECT FOLDER CONTEXT: ${folderName}\n`;
+  bundle += `Total Files: ${filesToBundle.length}\n`;
+  bundle += `Generated: ${new Date().toLocaleString()}\n`;
+  bundle += `================================================================================\n\n`;
+  bundle += `--------------------------------------------------------------------------------\n`;
+  bundle += `DIRECTORY TREE:\n`;
+  bundle += `--------------------------------------------------------------------------------\n`;
+  bundle += `${treeStr}\n\n`;
+  bundle += `--------------------------------------------------------------------------------\n`;
+  bundle += `FILE CONTENTS:\n`;
+  bundle += `--------------------------------------------------------------------------------\n\n`;
+
+  for (const file of filesToBundle) {
+    const relPath = file.webkitRelativePath || file.relativePath || file.name;
+    try {
+      const content = await file.text();
+      bundle += `================================================================================\n`;
+      bundle += `FILE: ${relPath}\n`;
+      bundle += `================================================================================\n`;
+      bundle += `${content}\n\n`;
+    } catch (err) {
+      console.warn(`Could not read file ${relPath}:`, err);
+    }
+  }
+
+  const bundleFileName = `${folderName}_bundle.txt`;
+  const bundleFile = new File([bundle], bundleFileName, { type: "text/plain" });
+
+  showToast(`Uploading "${bundleFileName}" (${Math.round(bundle.length / 1024)} KB)...`, "info");
+
+  const attached = await attachFileToGeminiInput(bundleFile);
+  if (attached) {
+    showToast(`Folder "${folderName}" attached successfully (${filesToBundle.length} files)!`, "success");
+  } else {
+    showToast(`Folder context inserted into prompt (${filesToBundle.length} files)!`, "success");
+  }
+}
+
+function injectFolderUploadButton() {
+  if (!isFolderUploadEnabled) {
+    const existing = document.getElementById("sg-folder-upload-btn");
+    if (existing) existing.remove();
+    return;
+  }
+  if (document.getElementById("sg-folder-upload-btn")) return;
+
+  const uploadBtn = document.querySelector('button[data-test-id="uploader-button"]') ||
+                    document.querySelector('button:has(mat-icon[fonticon="plus"])') ||
+                    document.querySelector('button[aria-label*="upload" i]') ||
+                    document.querySelector('button[aria-label*="attachment" i]');
+
+  if (!uploadBtn || !uploadBtn.parentElement) {
+    setTimeout(injectFolderUploadButton, 1000);
+    return;
+  }
+
+  let dirInput = document.getElementById("sg-dir-input");
+  if (!dirInput) {
+    dirInput = document.createElement("input");
+    dirInput.type = "file";
+    dirInput.id = "sg-dir-input";
+    dirInput.webkitdirectory = true;
+    dirInput.setAttribute("directory", "");
+    dirInput.multiple = true;
+    dirInput.style.display = "none";
+    document.body.appendChild(dirInput);
+
+    dirInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+      await processAndUploadFolder(files);
+      dirInput.value = "";
+    });
+  }
+
+  const btn = document.createElement("button");
+  btn.id = "sg-folder-upload-btn";
+  btn.className = "sg-folder-upload-btn";
+  btn.type = "button";
+  btn.setAttribute("data-tooltip-fast", "Upload entire folder (Context Bundle)");
+  btn.setAttribute("aria-label", "Upload entire folder");
+  btn.innerHTML = `
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+      <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z M12 9l4 4h-3v4h-2v-4H8l4-4z"/>
+    </svg>
+  `;
+
+  uploadBtn.parentElement.insertBefore(btn, uploadBtn.nextSibling);
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dirInput.click();
+  });
+}
+
+function initFolderDragDrop() {
+  if (!isFolderUploadEnabled) return;
+  const inputContainer = document.querySelector("input-area-v2, .input-area, rich-textarea");
+  if (!inputContainer || inputContainer.dataset.sgFolderDropAttached) return;
+  inputContainer.dataset.sgFolderDropAttached = "true";
+
+  inputContainer.addEventListener("dragover", (e) => {
+    if (e.dataTransfer && e.dataTransfer.items) {
+      for (const item of e.dataTransfer.items) {
+        if (item.kind === "file") {
+          const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+          if (entry && entry.isDirectory) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            inputContainer.classList.add("sg-folder-drag-active");
+            return;
+          }
+        }
+      }
+    }
+  });
+
+  inputContainer.addEventListener("dragleave", () => {
+    inputContainer.classList.remove("sg-folder-drag-active");
+  });
+
+  inputContainer.addEventListener("drop", async (e) => {
+    inputContainer.classList.remove("sg-folder-drag-active");
+    if (!e.dataTransfer || !e.dataTransfer.items) return;
+
+    const dirEntries = [];
+    for (const item of e.dataTransfer.items) {
+      if (item.kind === "file") {
+        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+        if (entry && entry.isDirectory) {
+          dirEntries.push(entry);
+        }
+      }
+    }
+
+    if (dirEntries.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      for (const entry of dirEntries) {
+        const files = await readFileSystemEntryRecursively(entry);
+        if (files.length) {
+          await processAndUploadFolder(files, entry.name);
+        }
+      }
+    }
+  });
+}
+
+// Register with observer registry & initial sync
+sgObserverRegistry.registerUIRefresh("folderUpload", () => {
+  if (isFolderUploadEnabled) {
+    injectFolderUploadButton();
+    initFolderDragDrop();
+  }
+});
+
+chrome.storage.sync.get(["folderUploadEnabled"], res => {
+  isFolderUploadEnabled = res.folderUploadEnabled !== false;
+  if (isFolderUploadEnabled) {
+    setTimeout(() => {
+      injectFolderUploadButton();
+      initFolderDragDrop();
+    }, 1500);
+  }
+});

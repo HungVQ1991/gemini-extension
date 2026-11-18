@@ -2760,3 +2760,38 @@
 .sg-pro-btn, .sg-upgrade-btn, #sg-upgrade-btn, .sg-crown, [data-tooltip-fast*='Pro Feature Only'] {
   display: none !important;
 }
+
+
+/* Folder Uploader Styles */
+.sg-folder-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--sg-on-surface-variant, #9aa0a6);
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, transform 0.15s;
+  margin: 0 4px;
+  vertical-align: middle;
+}
+
+.sg-folder-upload-btn:hover {
+  background-color: var(--sg-surface-hover, rgba(255, 255, 255, 0.08));
+  color: var(--sg-primary, #8ab4f8);
+  transform: scale(1.05);
+}
+
+.sg-folder-upload-btn:active {
+  transform: scale(0.95);
+}
+
+.sg-folder-drag-active {
+  outline: 2px dashed var(--sg-primary, #8ab4f8) !important;
+  outline-offset: -2px;
+  background-color: rgba(138, 180, 248, 0.08) !important;
+  border-radius: 12px;
+}
