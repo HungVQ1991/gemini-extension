@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Power Suite</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header with Icon, Name, Version (Clean Personal Edition) -->
+        <div class="header">
+            <div class="header-content">
+                <img src="icons/icon48.png" alt="Gemini Power Suite" class="header-icon">
+                <div class="header-text">
+                    <div class="header-title-link">
+                        <h1>Gemini Power Suite</h1>
+                        <span class="version" id="extension-version">v1.0.0 (Personal)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- Master Extension Toggle -->
+            <div class="master-toggle-section">
+                <div class="toggle-row master-row"
+                    data-tooltip="Master switch to enable or disable all Gemini Power Suite features.">
+                    <label for="extension-toggle">Extension Enabled</label>
+                    <label class="switch">
+                        <input type="checkbox" id="extension-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Superpower Menu Section -->
+            <div class="settings-section" id="menu-settings">
+                <h3>Menu & Folders</h3>
+                <div class="toggle-row" data-tooltip="Toggle the custom sidebar menu for Folders and Prompts.">
+                    <label for="sidebar-dropdown-toggle">Show Sidebar Menu</label>
+                    <label class="switch">
+                        <input type="checkbox" id="sidebar-dropdown-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Create and manage folders to organize your chat history.">
+                    <label for="folders-toggle">Enable Folders</label>
+                    <label class="switch">
+                        <input type="checkbox" id="folders-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row indentation-level-1"
+                    data-tooltip="Enable the Recycle Bin to restore deleted chats.">
+                    <label for="trashcan-toggle">Enable Trashcan</label>
+                    <label class="switch">
+                        <input type="checkbox" id="trashcan-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Access and save your custom prompt templates.">
+                    <label for="prompts-toggle">Enable Prompts Library</label>
+                    <label class="switch">
+                        <input type="checkbox" id="prompts-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Toggle the 'Settings' item in the Superpower Menu.">
+                    <label for="settings-menu-toggle">Show Settings in Menu</label>
+                    <label class="switch">
+                        <input type="checkbox" id="settings-menu-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Interface Enhancements Section -->
+            <div class="settings-section" id="input-settings">
+                <h3>Interface Enhancements</h3>
+                <div class="toggle-row" data-tooltip="Export chats to PDF, DOCX, or Text files.">
+                    <label for="export-btn-toggle">Show Export Button</label>
+                    <label class="switch">
+                        <input type="checkbox" id="export-btn-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="View chat details, message counts, and save custom notes.">
+                    <label for="info-btn-toggle">Show Info Button</label>
+                    <label class="switch">
+                        <input type="checkbox" id="info-btn-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Show the wide chat toggle button in the header bar.">
+                    <label for="wide-chat-btn-toggle">Wide Chat Button</label>
+                    <label class="switch">
+                        <input type="checkbox" id="wide-chat-btn-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row"
+                    data-tooltip="Show the exact time each message was sent.">
+                    <label for="timestamps-toggle">Message Timestamps</label>
+                    <label class="switch">
+                        <input type="checkbox" id="timestamps-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Automatically rewrite and improve your prompts using AI.">
+                    <label for="optimize-toggle">Optimize Button</label>
+                    <label class="switch">
+                        <input type="checkbox" id="optimize-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Real-time statistics for your current input.">
+                    <label for="counter-toggle">Word/Character Counter</label>
+                    <label class="switch">
+                        <input type="checkbox" id="counter-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row indentation-level-1"
+                    data-tooltip="Show your real 5-hour and weekly Gemini quota usage.">
+                    <label for="daily-counter-toggle">Show Usage Counter</label>
+                    <label class="switch">
+                        <input type="checkbox" id="daily-counter-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Quick navigation to jump to the top or bottom of long chats.">
+                    <label for="scroll-toggle">Scroll Buttons</label>
+                    <label class="switch">
+                        <input type="checkbox" id="scroll-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Download AI responses as audio files (OGG format).">
+                    <label for="download-audio-toggle">Download Audio</label>
+                    <label class="switch">
+                        <input type="checkbox" id="download-audio-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Bookmark any AI response.">
+                    <label for="bookmarks-toggle">Bookmarks</label>
+                    <label class="switch">
+                        <input type="checkbox" id="bookmarks-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row"
+                    data-tooltip="Enable message queueing for sending multiple prompts in sequence.">
+                    <label for="queue-toggle">Message Queue</label>
+                    <label class="switch">
+                        <input type="checkbox" id="queue-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row indentation-level-1" data-tooltip="Show the queue status window.">
+                    <label for="show-queue-toggle">Show Queue Window</label>
+                    <label class="switch">
+                        <input type="checkbox" id="show-queue-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Sidebar Section -->
+            <div class="settings-section" id="sidebar-settings">
+                <h3>Sidebar</h3>
+                <div class="toggle-row" data-tooltip="Save space by collapsing the pinned conversations section.">
+                    <label for="pinned-collapse-toggle">Collapsible Pinned Chats</label>
+                    <label class="switch">
+                        <input type="checkbox" id="pinned-collapse-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row"
+                    data-tooltip="Drag a sidebar chat onto the input area to attach it as a PDF reference.">
+                    <label for="drag-chat-input-toggle">Reference Chats by Dragging</label>
+                    <label class="switch">
+                        <input type="checkbox" id="drag-chat-input-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- UI Declutter Section -->
+            <div class="settings-section" id="declutter-settings">
+                <h3>UI Declutter</h3>
+                <div class="toggle-row"
+                    data-tooltip="Hide 'Upgrade to Pro' and 'Upgrade to Google AI Ultra' upsell buttons.">
+                    <label for="hide-upgrade-btns-toggle">Hide Upgrade Buttons</label>
+                    <label class="switch">
+                        <input type="checkbox" id="hide-upgrade-btns-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row"
+                    data-tooltip="Hide the city and country location information at the bottom of the sidebar.">
+                    <label for="location-info-toggle">Hide Location Info</label>
+                    <label class="switch">
+                        <input type="checkbox" id="location-info-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Hide the 'Activity' button at the bottom of the sidebar.">
+                    <label for="activity-toggle">Hide Activity</label>
+                    <label class="switch">
+                        <input type="checkbox" id="activity-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Hide the entire Gems section from the sidebar.">
+                    <label for="hide-gems-button-toggle">Hide Gems</label>
+                    <label class="switch">
+                        <input type="checkbox" id="hide-gems-button-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Cloud Sync Section -->
+            <div class="settings-section" id="sync-settings">
+                <h3>Cloud Sync</h3>
+                <div class="toggle-row" data-tooltip="Sync your folders, prompts, and bookmarks to Google Drive AppData to access them across devices.">
+                    <label for="drive-sync-toggle">Google Drive Sync</label>
+                    <label class="switch">
+                        <input type="checkbox" id="drive-sync-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Advanced Section -->
+            <div class="settings-section" id="advanced-settings">
+                <h3>Advanced</h3>
+                <div class="shortcuts-row">
+                    <span>Focus Shortcut</span>
+                    <span style="font-size: 13px; font-weight: 500; background: var(--shortcut-input-bg); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--shortcut-input-border);">/ (Slash)</span>
+                </div>
+                <div class="shortcuts-row" style="margin-top: 12px;">
+                    <span>Model Settings</span>
+                    <button id="model-settings-btn" class="action-btn">Configure</button>
+                </div>
+            </div>
+
+            <!-- Refresh Notice -->
+            <p class="hint" style="text-align: center; margin-top: 12px;">You may need to refresh Gemini tab to see changes</p>
+        </div>
+    </div>
+
+    <!-- Warning Modal -->
+    <div id="warning-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content warning-modal">
+            <div class="modal-header">
+                <h3 id="warning-title">Warning ⚠️</h3>
+                <button class="modal-close-btn" id="warning-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="warning-main-text" style="font-weight: 500; margin-bottom: 10px;">Are you sure you want to disable Gemini Power Suite?</p>
+                <p id="warning-sub-text" style="font-size: 13px; color: var(--text-hint); line-height: 1.5;">When disabled, custom features will be hidden until re-enabled.</p>
+            </div>
+            <div class="modal-footer">
+                <button id="warning-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="warning-confirm-btn" class="primary-btn">Disable</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Settings Modal -->
+    <div id="model-settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="width: 300px;">
+            <div class="modal-header">
+                <h3>Model Settings</h3>
+                <button class="modal-close-btn" id="model-settings-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <span id="default-model-label"
+                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Default Model</span>
+                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Automatically switch to this model when opening Gemini.</p>
+                    <div class="sg-seg" id="default-model-seg" role="radiogroup" aria-labelledby="default-model-label">
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="none">None</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
+                    </div>
+                </div>
+                <div class="setting-item" style="margin-top: 16px;">
+                    <span id="default-thinking-level-label"
+                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Default Thinking Level</span>
+                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Automatically switch to this thinking level when opening Gemini.</p>
+                    <div class="sg-seg" id="default-thinking-level-seg" role="radiogroup" aria-labelledby="default-thinking-level-label">
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="none">None</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="low">Low</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="medium">Medium</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="high">High</button>
+                    </div>
+                </div>
+                <div class="setting-item" style="margin-top: 16px;">
+                    <span id="optimize-model-label"
+                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Optimization Model</span>
+                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Choose which model to use when optimizing prompts.</p>
+                    <div class="sg-seg" id="optimize-model-seg" role="radiogroup" aria-labelledby="optimize-model-label">
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer"></div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
