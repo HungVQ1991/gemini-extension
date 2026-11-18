@@ -678,45 +678,9 @@ chrome.storage.onChanged.addListener((e, t) => {
 let _sgGuideTooltipShown = !1;
 
 function showGuideTooltip() {
-  if (_sgGuideTooltipShown) return;
-  const e = document.getElementById("sg-guide-btn");
-  if (!e) return;
-  _sgGuideTooltipShown = !0, chrome.storage.sync.set({
-    hasSeenGuideTooltip: !0
-  });
-  const t = document.body.classList.contains("dark-theme"),
-    n = t ? "#2d2e31" : "#ffffff",
-    o = t ? "#e8eaed" : "#1f1f1f",
-    s = t ? "#9aa0a6" : "#5f6368",
-    r = t ? "#5f6368" : "#dadce0",
-    a = t ? "rgba(138,180,248,0.9)" : "rgba(26,115,232,0.9)",
-    c = t ? "rgba(138,180,248,0.35)" : "rgba(26,115,232,0.25)",
-    d = e.getBoundingClientRect(),
-    i = document.createElement("div");
-  i.id = "sg-guide-tooltip-ring", i.style.cssText = `\n        position: fixed;\n        left: ${d.left-4}px; top: ${d.top-4}px;\n        width: ${d.width+8}px; height: ${d.height+8}px;\n        border-radius: 50%;\n        box-shadow: 0 0 0 2px ${a}, 0 0 12px 3px ${c};\n        pointer-events: none;\n        z-index: 2147483646;\n        animation: sg-guide-ring-pulse 1.4s ease-in-out infinite;\n    `;
-  const l = document.createElement("div");
-  l.id = "sg-guide-tooltip";
-  const u = 230;
-  let g = d.left + d.width / 2 - 115;
-  g = Math.max(8, Math.min(g, window.innerWidth - u - 8));
-  const m = d.bottom + 12,
-    h = Math.max(g + 14, Math.min(d.left + d.width / 2, g + u - 14));
-  if (l.style.cssText = `\n        position: fixed;\n        left: ${g}px; top: ${m}px;\n        width: 230px;\n        background: ${n};\n        border: 1px solid ${r};\n        border-radius: 12px;\n        padding: 14px 16px 12px 16px;\n        box-shadow: 0 8px 28px rgba(0,0,0,0.28);\n        z-index: 2147483647;\n        font-family: 'Google Sans', 'Google Sans Text', Roboto, sans-serif;\n        opacity: 0; transform: translateY(-4px);\n        transition: opacity 0.18s ease, transform 0.18s ease;\n        box-sizing: border-box;\n    `, l.innerHTML = `\n        <div style="position:absolute;top:-7px;left:${h-g-7}px;\n            width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;\n            border-bottom:7px solid ${r};"></div>\n        <div style="position:absolute;top:-6px;left:${h-g-6}px;\n            width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;\n            border-bottom:6px solid ${n};"></div>\n        <div style="font-size:14px;font-weight:600;color:${o};margin-bottom:5px;">📖 New here?</div>\n        <p style="margin:0 0 12px 0;font-size:12.5px;line-height:1.45;color:${s};">\n            Open the <strong>Guide</strong> any time for a full walkthrough of every feature.\n        </p>\n        <div style="display:flex;justify-content:flex-end;gap:8px;">\n            <button id="sg-guide-tooltip-dismiss" style="\n                padding:6px 14px;border:none;border-radius:7px;cursor:pointer;\n                font-family:inherit;font-size:12.5px;font-weight:600;\n                background:linear-gradient(135deg, #4285f4 0%, #1a73e8 100%);color:#fff;\n            ">Got it</button>\n        </div>\n    `, !document.getElementById("sg-guide-tooltip-style")) {
-    const e = document.createElement("style");
-    e.id = "sg-guide-tooltip-style", e.textContent = `@keyframes sg-guide-ring-pulse {\n            0%,100% { box-shadow: 0 0 0 2px ${a}, 0 0 10px 2px ${c}; }\n            50% { box-shadow: 0 0 0 3px ${a}, 0 0 18px 5px ${c}; }\n        }`, document.head.appendChild(e)
-  }
-  document.body.appendChild(i), document.body.appendChild(l), requestAnimationFrame(() => {
-    l.style.opacity = "1", l.style.transform = "translateY(0)"
-  });
-  const p = () => {
-    l.style.opacity = "0", l.style.transform = "translateY(-4px)", setTimeout(() => {
-      l.remove(), i.remove()
-    }, 180)
-  };
-  l.querySelector("#sg-guide-tooltip-dismiss").addEventListener("click", p), e.addEventListener("click", p, {
-    once: !0
-  })
-}! function() {
+  return;
+}
+! function() {
   const e = {
     key: "s",
     alt: !0,

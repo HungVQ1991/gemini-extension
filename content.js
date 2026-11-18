@@ -28,7 +28,7 @@ window.addEventListener("SG_RELOAD_REQUEST", () => {
   })
 });
 let isExtensionEnabled = !0;
-const guideUrl = chrome.runtime.getURL("guide.html");
+const guideUrl = "";
 
 function getGoogleAccountIndex() {
   const e = window.location.pathname.match(/^\/u\/(\d+)\//);
@@ -9493,9 +9493,7 @@ function sgTourRenderStep(e, t, n, o) {
       A.style.background = e
     }), A.addEventListener("click", () => {
       try {
-        chrome.runtime.sendMessage({
-          type: "OPEN_GUIDE"
-        })
+        // guide removed
       } catch (e) {}
     })
   }
@@ -9562,11 +9560,7 @@ function sgCancelWelcomeTourTimer() {
   _sgWelcomeTourTimer && (clearTimeout(_sgWelcomeTourTimer), _sgWelcomeTourTimer = null)
 }
 
-function sgMaybeShowGuideTooltipInPopup() {
-  _sgWelcomeTourPending && chrome.storage.sync.get([SG_WELCOME_TOUR_SEEN_KEY, SG_GUIDE_TOOLTIP_SEEN_KEY], e => {
-    !0 !== e[SG_WELCOME_TOUR_SEEN_KEY] && !0 !== e[SG_GUIDE_TOOLTIP_SEEN_KEY] && chrome.runtime.sendMessage({
-      type: "SHOW_GUIDE_TOOLTIP"
-    })
+function sgMaybeShowGuideTooltipInPopup() { return; })
   })
 }
 

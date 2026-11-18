@@ -1,3 +1,19 @@
+
+:root {
+  --sg-primary: #8ab4f8;
+  --sg-primary-hover: #aecbfa;
+  --sg-danger: #f28b82;
+  --sg-danger-hover: #f6aca6;
+  --sg-surface: #1e1e1e;
+  --sg-surface-variant: #28292a;
+  --sg-surface-hover: #35363a;
+  --sg-on-surface: #e8eaed;
+  --sg-on-surface-variant: #9aa0a6;
+  --sg-outline: #5f6368;
+  --sg-overlay: rgba(0, 0, 0, 0.65);
+  --sg-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
  body.sg-hide-premade-gems [data-sg-hidden-gem="true"] {
    display: none !important;
  }

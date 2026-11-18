@@ -1,26 +1,26 @@
 :host,
 :root {
-  --bg-container: #ffffff;
-  --text-main: #333333;
-  --text-label: #444444;
-  --text-hint: #888888;
-  --border-color: #e0e0e0;
-  --section-bg: #ffffff;
-  --row-hover-bg: rgba(0, 0, 0, 0.05);
-  --help-icon-border: #dadce0;
-  --help-icon-text: #70757a;
-  --modal-bg: #ffffff;
-  --modal-footer-bg: #f8f9fa;
-  --shortcut-input-bg: #f1f3f4;
-  --shortcut-input-border: #dadce0;
-  --master-row-bg: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
-  --slider-bg: #ccc;
+  --bg-container: #1e1f20;
+  --text-main: #e3e3e3;
+  --text-label: #e3e3e3;
+  --text-hint: #9aa0a6;
+  --border-color: #383a3e;
+  --section-bg: #1e1f20;
+  --row-hover-bg: rgba(255, 255, 255, 0.06);
+  --help-icon-border: #5f6368;
+  --help-icon-text: #9aa0a6;
+  --modal-bg: #1e1f20;
+  --modal-footer-bg: #282a2d;
+  --shortcut-input-bg: #282a2d;
+  --shortcut-input-border: #4d5156;
+  --master-row-bg: linear-gradient(135deg, rgba(138, 180, 248, 0.16) 0%, rgba(197, 138, 248, 0.16) 100%);
+  --slider-bg: #3c4043;
   --slider-btn: #ffffff;
-  --secondary-btn-bg: #ffffff;
-  --secondary-btn-text: #5f6368;
-  --secondary-btn-border: #dadce0;
-  --secondary-btn-hover: #f8f9fa;
-  --body-bg: linear-gradient(180deg, #f1effa 0%, #e8e4f4 100%);
+  --secondary-btn-bg: #282a2d;
+  --secondary-btn-text: #e3e3e3;
+  --secondary-btn-border: #5f6368;
+  --secondary-btn-hover: #383a3e;
+  --body-bg: #131314;
 }
 
 .dark-theme {
@@ -975,7 +975,7 @@ input:focus+.slider {
 .modal-content {
   background: var(--modal-bg);
   border-radius: 12px;
-  width: 320px;
+  width: 330px; background: var(--body-bg); color: var(--text-main); color-scheme: dark;
   max-height: 90vh;
   overflow: hidden;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
@@ -1391,4 +1391,18 @@ body.dark-theme::-webkit-scrollbar-thumb:hover {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+/* Dark Mode and No-Header Overrides */
+.header {
+  display: none !important;
+}
+
+.content {
+  padding: 14px 16px 18px !important;
+}
+
+.container {
+  background: var(--bg-container) !important;
 }
