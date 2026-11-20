@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Gemini Power Suite | Personal Edition",
   "version": "1.0.0",
+  "minimum_chrome_version": "111",
   "description": "Personal productivity suite for Google Gemini: Folders, Message Queue, Prompt Library, Wide Mode, and Export.",
   "action": {
     "default_icon": {
@@ -14,13 +15,21 @@
   "background": {
     "service_worker": "background.js"
   },
+  "commands": {
+    "open-gemini": {
+      "suggested_key": {
+        "default": "Alt+G"
+      },
+      "description": "Open Gemini App"
+    }
+  },
   "content_scripts": [
     {
       "js": [
         "spoof_injector.js"
       ],
       "matches": [
-        "*://gemini.google.com/*"
+        "https://gemini.google.com/*"
       ],
       "run_at": "document_start",
       "world": "MAIN"
@@ -30,28 +39,21 @@
         "content.css"
       ],
       "js": [
-        "lib/lottie_light_svg.min.js",
         "content.js"
       ],
       "matches": [
-        "*://gemini.google.com/*"
+        "https://gemini.google.com/*"
       ],
       "run_at": "document_end"
     }
   ],
   "host_permissions": [
-    "*://gemini.google.com/*"
+    "https://gemini.google.com/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "oauth2": {
-    "client_id": "660667966525-6840t2k5u65l4o5ketqjrdtqa9m95336.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/drive.appdata"
-    ]
   },
   "optional_permissions": [
     "identity"
@@ -59,27 +61,18 @@
   "permissions": [
     "tabs",
     "storage",
-    "scripting",
-    "unlimitedStorage",
-    "alarms"
+    "scripting"
   ],
   "web_accessible_resources": [
     {
       "matches": [
-        "*://gemini.google.com/*"
+        "https://gemini.google.com/*"
       ],
       "resources": [
         "content.css",
-        "popup.css",
         "icons/icon48.png",
         "icons/icon128.png",
-        "icons/brain.svg",
-        "lib/docx.umd.min.js",
-        "lib/jspdf.umd.min.js",
-        "lib/jspdf-autotable.min.js",
-        "lib/pdf-fonts.js",
-        "lib/lottie_light_svg.min.js",
-        "lib/thinking-dots.json"
+        "guide.html"
       ]
     }
   ]

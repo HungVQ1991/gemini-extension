@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Guide - Gemini Power Suite</title>
+  <style>
+    :root {
+      --primary: #1a73e8;
+      --bg: #ffffff;
+      --card-bg: #f8f9fa;
+      --text: #202124;
+      --text-muted: #5f6368;
+      --border: #dadce0;
+      --sg-font-flex: 'Google Sans Flex', 'Google Sans Text', 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --sg-font-text: 'Google Sans Text', 'Google Sans Flex', 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --sg-font-code: 'Google Sans Code', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --primary: #8ab4f8;
+        --bg: #1f1f1f;
+        --card-bg: #2d2f31;
+        --text: #e8eaed;
+        --text-muted: #9aa0a6;
+        --border: #444746;
+      }
+    }
+    body {
+      font-family: var(--sg-font-text);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    h1 { font-family: var(--sg-font-flex); color: var(--primary); margin-bottom: 8px; }
+    h2 { font-family: var(--sg-font-flex); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-top: 32px; }
+    .subtitle { color: var(--text-muted); font-size: 1.1em; margin-bottom: 32px; }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 { font-family: var(--sg-font-flex); margin-top: 0; color: var(--primary); }
+    kbd {
+      background: var(--border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--sg-font-code);
+      font-size: 0.9em;
+    }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Gemini Power Suite</h1>
+  <div class="subtitle">Quick User Guide &amp; Keyboard Shortcuts</div>
+
+  <h2 id="prompts">1. Prompt Library &amp; Chains</h2>
+  <div class="feature-card">
+    <h3 id="prompts-list">Quick Insert Commands <span id="chains"></span></h3>
+    <ul>
+      <li>Type <kbd>//</kbd> in the Gemini composer to open the <strong>Prompt Library</strong> search popup.</li>
+      <li>Type <kbd>,,</kbd> in the Gemini composer to insert a <strong>Prompt Chain</strong>.</li>
+      <li>Use variables like <code>{{variable_name}}</code> in prompts for interactive replacement prompts before sending.</li>
+    </ul>
+  </div>
+
+  <h2 id="folders">2. Folders &amp; Organization</h2>
+  <div class="feature-card">
+    <h3 id="chats">Organize Chats <span id="recycle-bin"></span></h3>
+    <ul>
+      <li>Create custom folders with colors in the Gemini sidebar.</li>
+      <li>Drag and drop chats into folders, or use the chat context menu.</li>
+      <li>Bookmark important response turns within conversations for quick access.</li>
+    </ul>
+  </div>
+
+  <h2>3. Prompt Optimization &amp; Grammar Fix</h2>
+  <div class="feature-card">
+    <h3>Enhance Your Queries</h3>
+    <ul>
+      <li>Click the <strong>Optimize</strong> button next to the composer to rewrite and upgrade your prompt.</li>
+      <li>Press <kbd>Ctrl+Shift+G</kbd> (or your custom shortcut) to automatically correct spelling and grammar errors.</li>
+    </ul>
+  </div>
+
+  <h2>4. Message Queue</h2>
+  <div class="feature-card">
+    <h3>Continuous Sending</h3>
+    <ul>
+      <li>While Gemini is generating a response, press <kbd>Enter</kbd> to add your message to the sequential queue.</li>
+      <li>Messages in the queue are sent automatically as soon as Gemini finishes generating the previous response.</li>
+    </ul>
+  </div>
+
+  <h2>5. Export &amp; Utilities</h2>
+  <div class="feature-card">
+    <h3>Chat Tools</h3>
+    <ul>
+      <li>Export conversations to <strong>Markdown</strong>, <strong>PDF</strong>, or <strong>DOCX</strong> via the export button.</li>
+      <li>Upload entire folders as bundled context by clicking the folder button next to the file uploader.</li>
+      <li>Use the double-click action on the scroll-down button to toggle auto-scroll during response generation.</li>
+    </ul>
+  </div>
+</body>
+</html>

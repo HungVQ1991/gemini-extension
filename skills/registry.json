@@ -1,0 +1,115 @@
+{
+  "bundleVersion": "1.1.0",
+  "skills": [
+    {
+      "id": "acknowledgment",
+      "name": "Acknowledgment",
+      "aliases": ["/acknowledgment/", "/ac/", "@acknowledgment"],
+      "description": "Acknowledge and absorb user-provided context into the current conversation without reasoning, analysis, summarization, or follow-up suggestions. Explicit-only: trigger ONLY when the user invokes /ac/, /acknowledgment/, or @acknowledgment, or explicitly instructs to record information without processing. Short-circuits and overrides any other skill invoked in the same prompt.",
+      "file": "skills/acknowledgment.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "agent-guide-mode",
+      "name": "Agent Guide Mode",
+      "aliases": ["/agent-guide/", "/ag/"],
+      "description": "Design single-agent or multi-agent architectures, orchestration topologies, explicit system prompts, inter-agent handoff protocols, and verification gates to guide a single AI agent or a group of AI agents in executing complex tasks. Defaults to a single autonomous agent unless multi-agent orchestration is explicitly requested or strictly justified. Trigger when the user invokes /agent-guide/ or /ag/, or asks to coordinate, orchestrate, structure workflows, or write instructions for AI agents.",
+      "file": "skills/agent-guide-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "analyze-mode",
+      "name": "Analyze Mode",
+      "aliases": ["/analyze/", "/an/"],
+      "description": "Objectively identify and describe the nature, properties, operating principles, constraints, and relationships of a subject without proposing solutions or implementation plans. Trigger when the user uses /analyze/ or /an/, or asks for an objective, technical breakdown of facts versus inferences and assumptions.",
+      "file": "skills/analyze-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "brainstorm-mode",
+      "name": "Brainstorm Mode",
+      "aliases": ["/brainstorm/", "/br/"],
+      "description": "Generate high-quality, non-trivial ideas, mechanisms, or solution approaches derived from existing context, code, architectures, or constraints. Trigger when the user invokes /brainstorm/ or /br/, or asks to brainstorm, ideate, or explore novel approaches and better implementations based on available information.",
+      "file": "skills/brainstorm-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "breakdown-mode",
+      "name": "Breakdown Mode",
+      "aliases": ["/breakdown/", "/bd/"],
+      "description": "Decompose a complex subject into its constituent components and explain the role, function, relationships, and interactions of each part within the whole. Trigger when the user uses /breakdown/ or /bd/, or asks to dissect code, formulas, circuits, systems, documents, or workflows.",
+      "file": "skills/breakdown-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "debug-mode",
+      "name": "Debug Mode",
+      "aliases": ["/debug/", "/db/"],
+      "description": "Diagnose errors, unexpected behavior, or incorrect results by separating symptoms, direct causes, and root causes, ranking hypotheses, and proposing verification steps and fixes. Trigger when the user uses /debug/ or /db/, or asks to troubleshoot a bug or system failure.",
+      "file": "skills/debug-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "no-code-mode",
+      "name": "No-Code Mode",
+      "aliases": ["/no code/", "/nc/"],
+      "description": "Constrain responses to conceptual analysis, architecture, algorithms, and logic flow without generating any source code. Trigger when the user uses /no code/ or /nc/, or explicitly asks to discuss design or logic without writing code.",
+      "file": "skills/no-code-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "origin-mode",
+      "name": "Origin Mode",
+      "aliases": ["/origin/", "/og/"],
+      "description": "Explain concepts, formulas, algorithms, data structures, or technologies starting from the underlying real-world need and prior limitations before introducing the definition. Trigger when the user uses /origin/ or /og/, or asks why a concept exists and how to derive it from first principles.",
+      "file": "skills/origin-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "plan-mode",
+      "name": "Plan Mode",
+      "aliases": ["/plan/", "/pl/"],
+      "description": "Transform an objective into a dependency-ordered sequence of actionable phases and tasks with inputs, outputs, transition criteria, risks, and trade-offs. Trigger when the user uses /plan/ or /pl/, or asks for a structured execution roadmap.",
+      "file": "skills/plan-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "review-mode",
+      "name": "Review Mode",
+      "aliases": ["/review/", "/rv/"],
+      "description": "Critically evaluate code, architecture, plans, or documents against requirements, constraints, and best practices, prioritizing high-impact defects over style. Trigger when the user uses /review/ or /rv/, or asks for a rigorous, evidence-based critique.",
+      "file": "skills/review-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "simplify-mode",
+      "name": "Simplify Mode",
+      "aliases": ["/simplify/", "/sm/"],
+      "description": "Explain complex concepts, phenomena, or technical mechanisms in accessible, everyday language using analogies and mental models without sacrificing technical accuracy. Trigger when the user uses /simplify/ or /sm/, or asks for an intuitive, beginner-friendly explanation.",
+      "file": "skills/simplify-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    }
+  ]
+}

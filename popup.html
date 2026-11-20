@@ -11,6 +11,11 @@
 <body class="dark-theme">
     <div class="container">
         <div class="content">
+            <div class="sg-popup-search-wrap">
+                <input type="search" id="sg-popup-search" class="sg-popup-search" placeholder="Filter settings..." aria-label="Filter settings" autocomplete="off">
+                <button type="button" id="sg-popup-search-clear" class="sg-popup-search-clear" aria-label="Clear filter" hidden>&times;</button>
+            </div>
+
             <!-- Master Extension Toggle -->
             <div class="master-toggle-section">
                 <div class="toggle-row master-row"
@@ -23,7 +28,7 @@
                 </div>
             </div>
 
-            <!-- Superpower Menu Section -->
+            <!-- Sidebar Menu Section -->
             <div class="settings-section" id="menu-settings">
                 <h3>Menu & Folders</h3>
                 <div class="toggle-row" data-tooltip="Toggle the custom sidebar menu for Folders and Prompts.">
@@ -55,12 +60,27 @@
                         <span class="slider"></span>
                     </label>
                 </div>
-                <div class="toggle-row" data-tooltip="Toggle the 'Settings' item in the Superpower Menu.">
-                    <label for="settings-menu-toggle">Show Settings in Menu</label>
+            </div>
+
+            <!-- Skills Registry Section -->
+            <div class="settings-section" id="skills-settings">
+                <h3>Skills Registry</h3>
+                <div class="toggle-row" data-tooltip="Resolve skill triggers (/alias/, @skill-id) in the composer and inject instructions before sending across all accounts.">
+                    <label for="skills-injection-toggle">Skill Injection (Mode 1)</label>
                     <label class="switch">
-                        <input type="checkbox" id="settings-menu-toggle">
+                        <input type="checkbox" id="skills-injection-toggle">
                         <span class="slider"></span>
                     </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Prepend enabled Baseline Instructions on the first turn of a new chat (unless opted out per account).">
+                    <label for="baseline-injection-toggle">Baseline Injection (First Turn)</label>
+                    <label class="switch">
+                        <input type="checkbox" id="baseline-injection-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item" style="margin-top: 6px;">
+                    <button type="button" id="open-skills-manager-btn" class="secondary-btn" style="width: 100%;">Manage Skills &amp; Migration</button>
                 </div>
             </div>
 
@@ -68,7 +88,7 @@
             <div class="settings-section" id="input-settings">
                 <h3>Interface Enhancements</h3>
                 <div class="toggle-row" data-tooltip="Upload an entire folder as a structured context bundle to Gemini.">
-                    <label for="folder-upload-toggle">Folder Uploader (📁)</label>
+                    <label for="folder-upload-toggle">Folder Uploader</label>
                     <label class="switch">
                         <input type="checkbox" id="folder-upload-toggle">
                         <span class="slider"></span>
@@ -96,6 +116,14 @@
                     </label>
                 </div>
                 <div class="toggle-row"
+                    data-tooltip="Auto-hide top-right header action buttons and reveal on hover.">
+                    <label for="autohide-top-actions-toggle">Auto-hide Top Actions</label>
+                    <label class="switch">
+                        <input type="checkbox" id="autohide-top-actions-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row"
                     data-tooltip="Show the exact time each message was sent.">
                     <label for="timestamps-toggle">Message Timestamps</label>
                     <label class="switch">
@@ -117,21 +145,6 @@
                         <span class="slider"></span>
                     </label>
                 </div>
-                <div class="toggle-row indentation-level-1"
-                    data-tooltip="Show your real 5-hour and weekly Gemini quota usage.">
-                    <label for="daily-counter-toggle">Show Usage Counter</label>
-                    <label class="switch">
-                        <input type="checkbox" id="daily-counter-toggle">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="toggle-row" data-tooltip="Quick navigation to jump to the top or bottom of long chats.">
-                    <label for="scroll-toggle">Scroll Buttons</label>
-                    <label class="switch">
-                        <input type="checkbox" id="scroll-toggle">
-                        <span class="slider"></span>
-                    </label>
-                </div>
                 <div class="toggle-row" data-tooltip="Download AI responses as audio files (OGG format).">
                     <label for="download-audio-toggle">Download Audio</label>
                     <label class="switch">
@@ -143,6 +156,41 @@
                     <label for="bookmarks-toggle">Bookmarks</label>
                     <label class="switch">
                         <input type="checkbox" id="bookmarks-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Show a floating collapsible outline of turns and headings for quick navigation.">
+                    <label for="outline-toggle">Conversation Outline</label>
+                    <label class="switch">
+                        <input type="checkbox" id="outline-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Pack selected turns or bookmarks into a structured hand-off prompt in a new chat.">
+                    <label for="fork-handoff-toggle">Fork &amp; Hand-off Summary</label>
+                    <label class="switch">
+                        <input type="checkbox" id="fork-handoff-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Add Collapse/Expand and Diff actions to Gemini code block headers.">
+                    <label for="code-actions-toggle">Smart Code Block Actions</label>
+                    <label class="switch">
+                        <input type="checkbox" id="code-actions-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Open global quick search &amp; command palette with Ctrl+K (Cmd+K on Mac).">
+                    <label for="command-palette-toggle">Command Palette (Ctrl+K)</label>
+                    <label class="switch">
+                        <input type="checkbox" id="command-palette-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row" data-tooltip="Replace Gemini's model picker with an interactive 118-element periodic table selector.">
+                    <label for="periodic-model-picker-toggle">Model Periodic Table</label>
+                    <label class="switch">
+                        <input type="checkbox" id="periodic-model-picker-toggle">
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -166,6 +214,14 @@
             <!-- Sidebar Section -->
             <div class="settings-section" id="sidebar-settings">
                 <h3>Sidebar</h3>
+                <div class="toggle-row"
+                    data-tooltip="Auto-hide the sidebar when collapsed and reveal it on mouse hover at screen edge.">
+                    <label for="autohide-sidebar-toggle">Auto-hide Collapsed Sidebar</label>
+                    <label class="switch">
+                        <input type="checkbox" id="autohide-sidebar-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
                 <div class="toggle-row" data-tooltip="Save space by collapsing the pinned conversations section.">
                     <label for="pinned-collapse-toggle">Collapsible Pinned Chats</label>
                     <label class="switch">
@@ -230,27 +286,29 @@
                 </div>
             </div>
 
-            <!-- Advanced Section -->
-            <div class="settings-section" id="advanced-settings">
-                <h3>Advanced</h3>
-                <div class="shortcuts-row">
-                    <span>Focus Shortcut</span>
-                    <span style="font-size: 13px; font-weight: 500; background: var(--shortcut-input-bg); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--shortcut-input-border);">/ (Slash)</span>
-                </div>
-                <div class="shortcuts-row" style="margin-top: 12px;">
-                    <span>Model Settings</span>
-                    <button id="model-settings-btn" class="action-btn">Configure</button>
+            <!-- Prompt Optimization Model Section -->
+            <div class="settings-section" id="optimization-model-section">
+                <h3>Prompt Optimization</h3>
+                <div class="setting-item" style="margin-top: 4px;">
+                    <span id="optimize-model-label"
+                        style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500; color: var(--text-label);">Optimization Model</span>
+                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 10px;">Choose which model to use when optimizing prompts.</p>
+                    <div class="sg-seg" id="optimize-model-seg" role="radiogroup" aria-labelledby="optimize-model-label">
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- Refresh Notice -->
-            <p class="hint" style="text-align: center; margin-top: 12px;">You may need to refresh Gemini tab to see changes</p>
+
+            <p id="sg-popup-no-results" class="sg-popup-no-results" hidden>No matching settings</p>
         </div>
     </div>
 
     <!-- Warning Modal -->
     <div id="warning-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content warning-modal">
+        <div class="modal-content warning-modal" role="dialog" aria-modal="true" aria-labelledby="warning-title">
             <div class="modal-header">
                 <h3 id="warning-title">Warning ⚠️</h3>
                 <button class="modal-close-btn" id="warning-close-btn">&times;</button>
@@ -266,50 +324,7 @@
         </div>
     </div>
 
-    <!-- Model Settings Modal -->
-    <div id="model-settings-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 300px;">
-            <div class="modal-header">
-                <h3>Model Settings</h3>
-                <button class="modal-close-btn" id="model-settings-close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="setting-item">
-                    <span id="default-model-label"
-                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Default Model</span>
-                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Automatically switch to this model when opening Gemini.</p>
-                    <div class="sg-seg" id="default-model-seg" role="radiogroup" aria-labelledby="default-model-label">
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="none">None</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
-                    </div>
-                </div>
-                <div class="setting-item" style="margin-top: 16px;">
-                    <span id="default-thinking-level-label"
-                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Default Thinking Level</span>
-                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Automatically switch to this thinking level when opening Gemini.</p>
-                    <div class="sg-seg" id="default-thinking-level-seg" role="radiogroup" aria-labelledby="default-thinking-level-label">
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="none">None</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="low">Low</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="medium">Medium</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="high">High</button>
-                    </div>
-                </div>
-                <div class="setting-item" style="margin-top: 16px;">
-                    <span id="optimize-model-label"
-                        style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text-label);">Optimization Model</span>
-                    <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 12px;">Choose which model to use when optimizing prompts.</p>
-                    <div class="sg-seg" id="optimize-model-seg" role="radiogroup" aria-labelledby="optimize-model-label">
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer"></div>
-        </div>
-    </div>
+
 
     <script src="popup.js"></script>
 </body>
