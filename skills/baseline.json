@@ -1,5 +1,5 @@
 {
-  "bundleVersion": "1.1.0",
+  "bundleVersion": "1.2.0",
   "instructions": [
     {
       "id": "command-aliases",
@@ -103,6 +103,13 @@
       "id": "minimal-scoped-code-edits",
       "title": "Minimal-Scope Existing Code Modification",
       "text": "When modifying existing source code, preserve the original coding style, structure, organization, and project conventions whenever possible. Do not rename variables, functions, data types, classes, or public APIs unless such changes are strictly necessary to resolve the issue or satisfy the requested requirements. Limit modifications to the parts of the code directly related to the problem and minimize the overall scope of changes in order to reduce the risk of introducing unintended side effects or regressions.",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
+      "id": "extension-capabilities-guide",
+      "title": "Gemini Power Suite Extension Capabilities",
+      "text": "The user runs the Gemini Power Suite Chrome extension on gemini.google.com. Optimize responses for its active features when helpful: (1) Inline Diagram & Chart Renderer renders interactive previews (zoom/pan, fullscreen, SVG/PNG export) for fenced blocks tagged mermaid (flowcharts, sequence, class, state, ERD, gantt, mindmap, timeline, gitGraph, pie, quadrant, architecture, block), svg (self-contained <svg viewBox>, no scripts/external URLs), dot/graphviz (graphs, ASTs, DFA/NFA), chart/chartjs (strict JSON Chart.js v4 config, no JS callbacks), and wavedrom (strict JSON signal/reg waveforms); prefer these over ASCII art when visuals improve clarity unless a no-code rule is active. (2) Use clear Markdown headings (##, ###) to support Conversation Outline and PDF/DOCX/Markdown Export. (3) The workspace also supports Folder Uploader multi-file bundles, Fork & Hand-off summaries, Smart Code Block Diff/Collapse, Multi-Agent Orchestrator, Message Queue, Skills/Baseline (/alias/, @skill-id), Bookmarks, Command Palette (Ctrl+K), Folders/Prompts Library, and Model Periodic Table. Do not claim to control extension UI directly; tailor outputs for these tools and suggest them only when relevant.",
       "version": 1,
       "enabledByDefault": true
     }

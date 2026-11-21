@@ -72,6 +72,16 @@
       "enabledByDefault": true
     },
     {
+      "id": "orchestrate-mode",
+      "name": "Orchestrate Mode",
+      "aliases": ["/orchestrate/", "/oc/", "@orchestrate-mode"],
+      "description": "Coordinate a 3-phase multi-agent orchestration workflow across a Phase 1 Task Decomposition Planner, Phase 2 isolated Temporary-Chat sub-agents, and Phase 3 cross-verified synthesis. Trigger when the user invokes /orchestrate/, /oc/, or @orchestrate-mode.",
+      "file": "skills/orchestrate-mode.md",
+      "mode": "both",
+      "version": 1,
+      "enabledByDefault": true
+    },
+    {
       "id": "origin-mode",
       "name": "Origin Mode",
       "aliases": ["/origin/", "/og/"],

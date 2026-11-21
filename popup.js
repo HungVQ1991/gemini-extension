@@ -278,8 +278,10 @@ document.addEventListener("DOMContentLoaded", () => {
     { id: "outline-toggle", storageKey: "conversationOutlineEnabled", defaultOn: true, enableMsg: "ENABLE_OUTLINE", disableMsg: "DISABLE_OUTLINE" },
     { id: "fork-handoff-toggle", storageKey: "forkHandoffEnabled", defaultOn: true, enableMsg: "ENABLE_FORK_HANDOFF", disableMsg: "DISABLE_FORK_HANDOFF" },
     { id: "code-actions-toggle", storageKey: "codeBlockActionsEnabled", defaultOn: true, enableMsg: "ENABLE_CODE_BLOCK_ACTIONS", disableMsg: "DISABLE_CODE_BLOCK_ACTIONS" },
+    { id: "diagram-renderer-toggle", storageKey: "diagramRendererEnabled", defaultOn: true, enableMsg: "ENABLE_DIAGRAM_RENDERER", disableMsg: "DISABLE_DIAGRAM_RENDERER" },
     { id: "command-palette-toggle", storageKey: "commandPaletteEnabled", defaultOn: true, enableMsg: "ENABLE_COMMAND_PALETTE", disableMsg: "DISABLE_COMMAND_PALETTE" },
     { id: "periodic-model-picker-toggle", storageKey: "periodicModelPickerEnabled", defaultOn: false, enableMsg: "ENABLE_PERIODIC_MODEL_PICKER", disableMsg: "DISABLE_PERIODIC_MODEL_PICKER" },
+    { id: "orchestrator-toggle", storageKey: "orchestratorEnabled", defaultOn: true, enableMsg: "ENABLE_ORCHESTRATOR", disableMsg: "DISABLE_ORCHESTRATOR" },
     { id: "queue-toggle", storageKey: "queueingEnabled", defaultOn: true, enableMsg: "ENABLE_QUEUING", disableMsg: "DISABLE_QUEUING", onChange: updateQueueParamsState },
     { id: "show-queue-toggle", storageKey: "showQueueWindow", defaultOn: true, enableMsg: "SHOW_QUEUE_WINDOW", disableMsg: "HIDE_QUEUE_WINDOW" },
     // Sidebar

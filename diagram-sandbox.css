@@ -1,0 +1,128 @@
+:root {
+  --sb-bg: #ffffff;
+  --sb-surface: #f8f9fa;
+  --sb-text: #202124;
+  --sb-muted: #5f6368;
+  --sb-border: rgba(0, 0, 0, 0.08);
+  --sb-dot: rgba(0, 0, 0, 0.06);
+  --sb-error-bg: rgba(217, 48, 37, 0.08);
+  --sb-error-text: #b3261e;
+}
+
+body.sg-sb-dark {
+  --sb-bg: #16171a;
+  --sb-surface: #1e1f23;
+  --sb-text: #e8eaed;
+  --sb-muted: #9aa0a6;
+  --sb-border: rgba(255, 255, 255, 0.08);
+  --sb-dot: rgba(255, 255, 255, 0.06);
+  --sb-error-bg: rgba(242, 139, 130, 0.12);
+  --sb-error-text: #f28b82;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sb-bg);
+  color: var(--sb-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.sg-sb-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  background-color: var(--sb-bg);
+  background-image: radial-gradient(var(--sb-dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+  outline: none;
+}
+
+.sg-sb-viewport.sg-sb-dragging {
+  cursor: grabbing;
+}
+
+.sg-sb-viewport.sg-sb-chart-mode {
+  cursor: default;
+  padding: 16px;
+}
+
+.sg-sb-stage {
+  transform-origin: center center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  will-change: transform;
+}
+
+.sg-sb-stage svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.sg-sb-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sg-sb-chart-wrap canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sg-sb-status {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--sb-muted);
+  background: var(--sb-surface);
+  border: 1px solid var(--sb-border);
+  text-align: center;
+  word-break: break-word;
+}
+
+.sg-sb-status[hidden] {
+  display: none;
+}
+
+.sg-sb-status.sg-sb-error {
+  color: var(--sb-error-text);
+  background: var(--sb-error-bg);
+  border-color: transparent;
+}
+
+body.sg-sb-dark .sg-engine-wavedrom svg {
+  filter: invert(0.92) hue-rotate(180deg);
+}
+
+body.sg-sb-dark .sg-engine-dot svg text {
+  fill: #e8eaed;
+}
