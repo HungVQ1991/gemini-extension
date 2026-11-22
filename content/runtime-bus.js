@@ -133,8 +133,36 @@
     });
   }
 
-  if (!isSilentWorker() && typeof sgApplyBootstrapSyncDelta === "function") {
-    _sgBootstrapSyncListenerBound = true;
-    onStorageChanged("core:bootstrap-sync-cache", sgApplyBootstrapSyncDelta, { area: "sync" });
+  if (!isSilentWorker()) {
+    onMessageType("RUN_SELECTOR_DIAGNOSTICS", (_msg, _sender, sendResponse) => {
+      const selApi = typeof SG !== "undefined" && SG && SG.selectors ? SG.selectors : null;
+      const hasDoc = typeof document !== "undefined" && document;
+      const selectorProbe = selApi && typeof selApi.runDiagnosticsProbe === "function"
+        ? selApi.runDiagnosticsProbe(hasDoc ? document : null)
+        : {};
+      const runtimeHealth = selApi && typeof selApi.getHealthReport === "function"
+        ? selApi.getHealthReport()
+        : {};
+      const byId = id => (hasDoc && typeof document.getElementById === "function" ? document.getElementById(id) : null);
+      const qSel = s => (hasDoc && typeof document.querySelector === "function" ? document.querySelector(s) : null);
+      const ui = {
+        extensionEnabled: typeof SG !== "undefined" && SG && SG.state ? SG.state.extensionEnabled !== false : null,
+        usageCounterMounted: Boolean(byId("sg-usage-counter")),
+        orchestrateBtnMounted: Boolean(byId("sg-orchestrate-btn")),
+        periodicPickerActive: typeof isPeriodicModelPickerEnabled !== "undefined"
+          ? Boolean(isPeriodicModelPickerEnabled)
+          : Boolean(byId("sg-periodic-model-panel")),
+        hasMessages: Boolean(qSel("user-query, model-response"))
+      };
+      if (typeof sendResponse === "function") {
+        sendResponse({ ok: true, selectorProbe, runtimeHealth, ui });
+      }
+      return false;
+    });
+
+    if (typeof sgApplyBootstrapSyncDelta === "function") {
+      _sgBootstrapSyncListenerBound = true;
+      onStorageChanged("core:bootstrap-sync-cache", sgApplyBootstrapSyncDelta, { area: "sync" });
+    }
   }
 })();

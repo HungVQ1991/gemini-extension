@@ -4,6 +4,8 @@
 
 const SG_OUTLINE_UI_STATE_KEY = "sgOutlineUiState";
 const SG_FORK_PENDING_KEY = "sgPendingForkHandoff";
+const SG_FORK_ORIGINS_KEY = "sgForkOrigins";
+const SG_FORK_ORIGINS_MAX = 100;
 const SG_FORK_PENDING_TTL_MS = 120 * 1000;
 const SG_HANDOFF_OPEN_TAG = "[SG_HANDOFF_CONTEXT]";
 const SG_HANDOFF_CLOSE_TAG = "[/SG_HANDOFF_CONTEXT]";
@@ -25,6 +27,15 @@ let _sgOutlineSearchInput = null;
 let _sgOutlineHeadingsBtn = null;
 let _sgOutlineAssetsBtn = null;
 let _sgOutlineBmFilterBtn = null;
+let _sgOutlineSelectBtn = null;
+let _sgOutlineCheckpointBarEl = null;
+let _sgOutlineCheckpointCountEl = null;
+let _sgOutlineCheckpointGoBtn = null;
+let _sgOutlineSelectMode = false;
+const _sgOutlinePickedTurns = new Set();
+let _sgActiveForkOrigin = null;
+let _sgForkOriginBannerEl = null;
+let _sgLoadedOriginChatId = "";
 let _sgOutlineSignature = "";
 let _sgOutlineTurnsSnapshot = [];
 let _sgOutlineScanTimer = null;
@@ -53,6 +64,7 @@ const SG_HEADING_SVG_PATHS = ["M4 6h8", "M4 12h12", "M4 18h6", "M16 14l4 4", "M2
 const SG_BOOKMARK_SVG_PATHS = ["M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"];
 const SG_ASSET_SVG_PATHS = ["M12 2L2 7l10 5 10-5-10-5z", "M2 17l10 5 10-5", "M2 12l10 5 10-5"];
 const SG_EXPORT_SVG_PATHS = ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"];
+const SG_SELECT_CHECK_SVG_PATHS = ["M9 11l3 3L22 4", "M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"];
 
 function sgCreateSvgIcon(paths, size = 15) {
   const ns = "http://www.w3.org/2000/svg";
@@ -448,6 +460,8 @@ function sgScanConversationTurns() {
   const chatKey = (typeof getCurrentChatId === "function" && getCurrentChatId()) || "__active_chat__";
   if (_sgOutlineLastChatId && _sgOutlineLastChatId !== chatKey) {
     _sgOutlineActiveKey = "";
+    _sgOutlinePickedTurns.clear();
+    _sgOutlineSelectMode = false;
   }
   _sgOutlineLastChatId = chatKey;
 
@@ -818,6 +832,13 @@ function sgEnsureOutlineRoot() {
     onClick: () => sgOpenForkHandoffModal({ mode: "range", upToTurn: _sgOutlineTurnsSnapshot.length })
   }, sgCreateSvgIcon(SG_FORK_SVG_PATHS, 14));
 
+  _sgOutlineSelectBtn = sgSkillEl("button", {
+    type: "button",
+    className: `sg-outline-icon-btn${_sgOutlineSelectMode ? " active" : ""}`,
+    title: "Select multiple turns for Smart Checkpoint",
+    onClick: () => sgToggleOutlineSelectMode()
+  }, sgCreateSvgIcon(SG_SELECT_CHECK_SVG_PATHS, 14));
+
   _sgOutlineHeadingsBtn = sgSkillEl("button", {
     type: "button",
     className: `sg-outline-icon-btn${_sgOutlineUiState.showHeadings ? " active" : ""}`,
@@ -887,6 +908,44 @@ function sgEnsureOutlineRoot() {
   });
 
   _sgOutlineListEl = sgSkillEl("div", { className: "sg-outline-list" });
+  _sgOutlineCheckpointCountEl = sgSkillEl("span", {
+    className: "sg-outline-checkpoint-count",
+    textContent: "Pick turns for Smart Checkpoint"
+  });
+  _sgOutlineCheckpointGoBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-outline-checkpoint-go-btn",
+    disabled: true,
+    textContent: "Smart Checkpoint",
+    onClick: () => {
+      const picked = _sgOutlineTurnsSnapshot
+        .filter(t => _sgOutlinePickedTurns.has(t.turnNumber))
+        .map(t => t.turnNumber);
+      if (!picked.length) return;
+      sgOpenForkHandoffModal({
+        mode: "custom",
+        selectedTurns: picked,
+        preset: "smart_checkpoint",
+        autoSummarize: true
+      });
+    }
+  });
+  const checkpointClearBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-outline-checkpoint-clear-btn",
+    textContent: "Clear",
+    onClick: () => {
+      _sgOutlinePickedTurns.clear();
+      sgRenderOutline(_sgOutlineTurnsSnapshot, true);
+    }
+  });
+  _sgOutlineCheckpointBarEl = sgSkillEl("div", { id: "sg-outline-checkpoint-bar", style: "display: none;" }, [
+    _sgOutlineCheckpointCountEl,
+    sgSkillEl("div", { className: "sg-outline-checkpoint-actions" }, [
+      checkpointClearBtn,
+      _sgOutlineCheckpointGoBtn
+    ])
+  ]);
 
   const panel = sgSkillEl("div", { id: "sg-outline-panel" }, [
     sgSkillEl("div", { className: "sg-outline-header" }, [
@@ -897,6 +956,7 @@ function sgEnsureOutlineRoot() {
       sgSkillEl("div", { className: "sg-outline-header-actions" }, [
         exportHeaderBtn,
         forkHeaderBtn,
+        _sgOutlineSelectBtn,
         _sgOutlineHeadingsBtn,
         _sgOutlineAssetsBtn,
         _sgOutlineBmFilterBtn,
@@ -904,7 +964,8 @@ function sgEnsureOutlineRoot() {
       ])
     ]),
     sgSkillEl("div", { className: "sg-outline-search-wrap" }, _sgOutlineSearchInput),
-    _sgOutlineListEl
+    _sgOutlineListEl,
+    _sgOutlineCheckpointBarEl
   ]);
 
   _sgOutlineRoot = sgSkillEl("div", { id: "sg-outline-root" }, [togglePill, panel]);
@@ -912,10 +973,44 @@ function sgEnsureOutlineRoot() {
   return _sgOutlineRoot;
 }
 
+function sgUpdateOutlineCheckpointBar() {
+  if (!_sgOutlineCheckpointBarEl) return;
+  const show = Boolean(
+    _sgOutlineSelectMode &&
+    _sgOutlineUiState.expanded &&
+    isForkHandoffEnabled &&
+    !sgShouldSuppressOutlineSurface() &&
+    _sgOutlineTurnsSnapshot.length > 0
+  );
+  _sgOutlineCheckpointBarEl.style.display = show ? "flex" : "none";
+  if (!show) return;
+  const validNums = new Set(_sgOutlineTurnsSnapshot.map(t => t.turnNumber));
+  let count = 0;
+  for (const n of _sgOutlinePickedTurns) {
+    if (validNums.has(n)) count++;
+  }
+  if (_sgOutlineCheckpointCountEl) {
+    _sgOutlineCheckpointCountEl.textContent = count > 0 ? `${count} turn(s) selected` : "Pick turns for Smart Checkpoint";
+  }
+  if (_sgOutlineCheckpointGoBtn) {
+    _sgOutlineCheckpointGoBtn.disabled = count === 0;
+  }
+}
+
+function sgToggleOutlineSelectMode() {
+  _sgOutlineSelectMode = !_sgOutlineSelectMode;
+  if (_sgOutlineSelectMode && !_sgOutlineUiState.expanded) {
+    _sgOutlineUiState.expanded = true;
+    sgPersistOutlineUiState();
+  }
+  sgRenderOutline(_sgOutlineTurnsSnapshot, true);
+}
+
 function sgRenderOutline(turns, force = false) {
   _sgOutlineTurnsSnapshot = Array.isArray(turns) ? turns : [];
   if (sgShouldSuppressOutlineSurface() || !isConversationOutlineEnabled || _sgOutlineTurnsSnapshot.length === 0) {
     if (_sgOutlineRoot) _sgOutlineRoot.style.display = "none";
+    if (_sgOutlineCheckpointBarEl) _sgOutlineCheckpointBarEl.style.display = "none";
     _sgOutlineSignature = "";
     return;
   }
@@ -936,12 +1031,19 @@ function sgRenderOutline(turns, force = false) {
   if (pillEl) pillEl.style.display = _sgOutlineUiState.expanded ? "none" : "inline-flex";
   if (panelEl) panelEl.style.display = _sgOutlineUiState.expanded ? "flex" : "none";
 
+  if (_sgOutlineSelectBtn) {
+    _sgOutlineSelectBtn.style.display = isForkHandoffEnabled ? "" : "none";
+    _sgOutlineSelectBtn.classList.toggle("active", Boolean(_sgOutlineSelectMode && isForkHandoffEnabled));
+  }
   if (_sgOutlineHeadingsBtn) _sgOutlineHeadingsBtn.classList.toggle("active", Boolean(_sgOutlineUiState.showHeadings));
   if (_sgOutlineAssetsBtn) _sgOutlineAssetsBtn.classList.toggle("active", Boolean(_sgOutlineUiState.showAssets));
   if (_sgOutlineBmFilterBtn) _sgOutlineBmFilterBtn.classList.toggle("active", Boolean(_sgOutlineUiState.bookmarkedOnly));
 
   sgPositionOutlineRoot();
-  if (!_sgOutlineUiState.expanded || !_sgOutlineListEl) return;
+  if (!_sgOutlineUiState.expanded || !_sgOutlineListEl) {
+    sgUpdateOutlineCheckpointBar();
+    return;
+  }
 
   const query = sgNormalizeInstructionText(_sgOutlineUiState.filterText || "").toLowerCase();
   _sgOutlineListEl.replaceChildren();
@@ -992,7 +1094,22 @@ function sgRenderOutline(turns, force = false) {
         }, sgCreateSvgIcon(SG_FORK_SVG_PATHS, 13))
       : null;
 
-    _sgOutlineListEl.appendChild(sgSkillEl("div", { className: "sg-outline-turn-row" }, [turnBtn, forkBtn]));
+    const pickCb = (_sgOutlineSelectMode && isForkHandoffEnabled)
+      ? sgSkillEl("input", {
+          type: "checkbox",
+          className: "sg-outline-pick-cb",
+          checked: _sgOutlinePickedTurns.has(turn.turnNumber),
+          "aria-label": `Select Turn #${turn.turnNumber} for Smart Checkpoint`,
+          onClick: ev => ev.stopPropagation(),
+          onChange: ev => {
+            if (ev.target.checked) _sgOutlinePickedTurns.add(turn.turnNumber);
+            else _sgOutlinePickedTurns.delete(turn.turnNumber);
+            sgUpdateOutlineCheckpointBar();
+          }
+        })
+      : null;
+
+    _sgOutlineListEl.appendChild(sgSkillEl("div", { className: "sg-outline-turn-row" }, [pickCb, turnBtn, forkBtn]));
 
     if (_sgOutlineUiState.showHeadings && matchedHeadings.length > 0) {
       for (const h of matchedHeadings) {
@@ -1034,6 +1151,7 @@ function sgRenderOutline(turns, force = false) {
       textContent: _sgOutlineUiState.bookmarkedOnly ? "No bookmarked turns match." : "No matching turns, headings, or assets."
     }));
   }
+  sgUpdateOutlineCheckpointBar();
 }
 
 function sgTruncateMarkdownSafely(md, maxChars) {
@@ -1070,11 +1188,393 @@ function sgStripFencedCodeBlocks(md) {
     .trim();
 }
 
+function sgSanitizeGeminiChatUrl(rawUrl) {
+  const str = String(rawUrl || "").trim();
+  const m = str.match(/^https:\/\/gemini\.google\.com\/(?:u\/\d+\/)?app\/([A-Za-z0-9_-]{4,128})$/);
+  if (!m || /^__/.test(m[1])) {
+    return "";
+  }
+  return str;
+}
+
+function sgBuildSafeGeminiChatUrl(chatId) {
+  const clean = String(chatId || "").trim();
+  if (!clean || /^__/.test(clean) || !/^[A-Za-z0-9_-]{4,128}$/.test(clean)) {
+    return "";
+  }
+  const base = sgGetGeminiNewChatUrl().replace(/\/+$/, "");
+  return sgSanitizeGeminiChatUrl(`${base}/${clean}`);
+}
+
+function sgBuildCheckpointTranscript(records, options = {}) {
+  const maxTotalChars = Number.isFinite(Number(options.maxTotalChars))
+    ? Math.max(2000, Math.min(48000, Number(options.maxTotalChars)))
+    : 28000;
+  const selected = (Array.isArray(records) ? records : []).filter(
+    r => r && (String(r.userText || "").trim() || String(r.modelText || "").trim())
+  );
+  if (!selected.length) {
+    return { transcript: "", originalChars: 0, turnNumbers: [] };
+  }
+
+  let originalChars = 0;
+  const turnNumbers = [];
+  for (const r of selected) {
+    if (typeof r.turnNumber === "number") turnNumbers.push(r.turnNumber);
+    originalChars += String(r.userText || "").length + String(r.modelText || "").length;
+  }
+
+  const lastIdx = selected.length - 1;
+  const lastBudget = Math.max(2400, Math.floor(maxTotalChars * 0.4));
+  const olderCount = Math.max(1, selected.length - 1);
+  const olderBudget = Math.max(600, Math.floor((maxTotalChars - lastBudget) / olderCount));
+  let usedChars = 0;
+  const parts = [];
+
+  selected.forEach((r, idx) => {
+    const isLast = idx === lastIdx;
+    const rawUser = String(r.userText || "").trim();
+    const rawModel = String(r.modelText || "").trim();
+    const turnBudget = isLast ? lastBudget : olderBudget;
+    const remaining = Math.max(500, maxTotalChars - usedChars);
+    const cap = Math.min(turnBudget, remaining);
+    const segs = [`### Turn ${r.turnNumber}`];
+    if (rawUser) {
+      const userCap = Math.max(250, Math.floor(cap * (isLast ? 0.35 : 0.4)));
+      segs.push(`User:\n${sgTruncateMarkdownSafely(rawUser, userCap)}`);
+    }
+    if (rawModel) {
+      const modelCap = Math.max(300, cap - Math.floor(cap * 0.35));
+      segs.push(`Gemini:\n${sgTruncateMarkdownSafely(rawModel, modelCap)}`);
+    }
+    const block = segs.join("\n\n");
+    usedChars += block.length;
+    parts.push(block);
+  });
+
+  return {
+    transcript: parts.join("\n\n---\n\n"),
+    originalChars,
+    turnNumbers
+  };
+}
+
+function sgBuildStructuredCheckpointFallback(records, options = {}) {
+  const selected = (Array.isArray(records) ? records : []).filter(
+    r => r && (String(r.userText || "").trim() || String(r.modelText || "").trim())
+  );
+  const sourceTitle = sgNormalizeInstructionText(options.sourceTitle || "Gemini Conversation") || "Gemini Conversation";
+  const customFocus = sgNormalizeInstructionText(options.customFocus || "");
+
+  if (!selected.length) {
+    return [
+      "## 1. Objective & Scope",
+      `- Source: ${sourceTitle}`,
+      "- Goal: No turns selected yet.",
+      "",
+      "## 2. Established Decisions",
+      "- (None recorded)",
+      "",
+      "## 3. Technical Constraints & Environment",
+      "- (None recorded)",
+      "",
+      "## 4. Current Code / Artifacts / Key Interfaces",
+      "- (None recorded)",
+      "",
+      "## 5. Open Questions & Next Steps",
+      "- Add next request below."
+    ].join("\n");
+  }
+
+  const firstPrompt = sgTruncateMarkdownSafely(String(selected[0].userText || selected[0].modelText || "").trim(), 500);
+  const lastTurn = selected[selected.length - 1];
+  const decisionLines = [];
+  const constraintLines = [];
+  const artifactBlocks = [];
+  const constraintRe = /\b(must|never|always|constraint|invariant|limit|max|min|require|readonly|fallback|timeout|schema|mv3|manifest|windows|compat)\b/i;
+
+  for (const r of selected) {
+    const modelStr = String(r.modelText || "");
+    const fenceMatches = modelStr.match(/```[\s\S]*?```/g) || [];
+    for (const block of fenceMatches) {
+      if (artifactBlocks.length < 3) {
+        artifactBlocks.push(`- Turn #${r.turnNumber} code snippet:\n${sgTruncateMarkdownSafely(block, 900)}`);
+      }
+    }
+    const lines = modelStr.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (constraintRe.test(line) && constraintLines.length < 6 && !constraintLines.includes(line)) {
+        constraintLines.push(line.replace(/^[-*]\s*/, ""));
+      }
+      if ((/^[-*]\s+/.test(line) || /^#{1,3}\s+/.test(line)) && decisionLines.length < 6) {
+        const clean = line.replace(/^[#*-]+\s*/, "");
+        if (clean.length >= 12 && !decisionLines.includes(clean)) {
+          decisionLines.push(clean);
+        }
+      }
+    }
+  }
+
+  if (artifactBlocks.length === 0) {
+    const lastModel = String(lastTurn.modelText || "").trim();
+    if (lastModel) {
+      artifactBlocks.push(sgTruncateMarkdownSafely(lastModel, 1000));
+    }
+  }
+
+  const objLines = [
+    `- Source conversation: ${sourceTitle} (${selected.length} selected turn(s))`,
+    firstPrompt ? `- Initial focus: ${firstPrompt.replace(/\s+/g, " ").slice(0, 320)}` : ""
+  ].filter(Boolean);
+  if (customFocus) objLines.push(`- Handoff focus: ${customFocus}`);
+
+  const nextPrompt = sgTruncateMarkdownSafely(String(lastTurn.userText || "").trim(), 400);
+  const openLines = [
+    nextPrompt ? `- Latest turn (#${lastTurn.turnNumber}) request: ${nextPrompt.replace(/\s+/g, " ")}` : "",
+    "- Continue from this checkpoint and confirm the immediate next step."
+  ].filter(Boolean);
+
+  return [
+    "## 1. Objective & Scope",
+    objLines.join("\n"),
+    "",
+    "## 2. Established Decisions",
+    (decisionLines.length ? decisionLines.map(d => `- ${d}`) : [`- Reviewed Turns #${selected.map(r => r.turnNumber).join(", #")}`]).join("\n"),
+    "",
+    "## 3. Technical Constraints & Environment",
+    (constraintLines.length ? constraintLines.map(c => `- ${c}`) : ["- Preserve prior established constraints and assumptions from selected turns."]).join("\n"),
+    "",
+    "## 4. Current Code / Artifacts / Key Interfaces",
+    (artifactBlocks.length ? artifactBlocks : ["- No fenced code artifacts captured in selected turns."]).join("\n\n"),
+    "",
+    "## 5. Open Questions & Next Steps",
+    openLines.join("\n")
+  ].join("\n");
+}
+
+function sgBuildSmartCheckpointEnvelope(summaryBody, meta = {}) {
+  const sourceTitle = sgNormalizeInstructionText(meta.sourceTitle || "Gemini Conversation") || "Gemini Conversation";
+  const safeUrl = sgSanitizeGeminiChatUrl(meta.sourceUrl || "");
+  const turnNums = Array.isArray(meta.turnNumbers) ? meta.turnNumbers.filter(n => typeof n === "number") : [];
+  const turnsLine = turnNums.length ? `${turnNums.length} turn(s) (#${turnNums.join(", #")})` : "selected turns";
+  const modelTag = sgNormalizeInstructionText(meta.modelLabel || "");
+  const modeLine = modelTag ? `Smart Checkpoint (${modelTag})` : "Smart Checkpoint";
+
+  const headerLines = [
+    SG_HANDOFF_OPEN_TAG,
+    `Source conversation: ${sourceTitle}`
+  ];
+  if (safeUrl) headerLines.push(`Source link: ${safeUrl}`);
+  headerLines.push(`Included turns: ${turnsLine}`);
+  headerLines.push(`Mode: ${modeLine}`);
+
+  const cleanBody = String(summaryBody || "").trim() || "(Empty checkpoint summary)";
+  return `${headerLines.join("\n")}\n\n${cleanBody}\n${SG_HANDOFF_CLOSE_TAG}\n\nContinue from the Smart Checkpoint above. Follow all established decisions and constraints.\n\nNext request: `;
+}
+
+function sgReadForkOriginsMap() {
+  return new Promise(resolve => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local || typeof chrome.storage.local.get !== "function") {
+        resolve({});
+        return;
+      }
+      chrome.storage.local.get([SG_FORK_ORIGINS_KEY], res => {
+        const raw = res && res[SG_FORK_ORIGINS_KEY];
+        resolve(raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {});
+      });
+    } catch (err) {
+      resolve({});
+    }
+  });
+}
+
+async function sgWriteForkOriginsMap(map) {
+  const next = {};
+  const entries = Object.entries(map && typeof map === "object" ? map : {})
+    .filter(([k, v]) => typeof k === "string" && k.trim() && v && typeof v === "object")
+    .sort((a, b) => Number((b[1] && b[1].createdAt) || 0) - Number((a[1] && a[1].createdAt) || 0))
+    .slice(0, SG_FORK_ORIGINS_MAX);
+  for (const [k, v] of entries) {
+    next[k] = v;
+  }
+  if (typeof safeLocalStorageSet === "function") {
+    return safeLocalStorageSet({ [SG_FORK_ORIGINS_KEY]: next });
+  }
+  return new Promise(resolve => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local || typeof chrome.storage.local.set !== "function") {
+        resolve(false);
+        return;
+      }
+      chrome.storage.local.set({ [SG_FORK_ORIGINS_KEY]: next }, () => resolve(!(chrome.runtime && chrome.runtime.lastError)));
+    } catch (err) {
+      resolve(false);
+    }
+  });
+}
+
+function sgRemoveForkOriginBanner() {
+  if (_sgForkOriginBannerEl) {
+    _sgForkOriginBannerEl.remove();
+    _sgForkOriginBannerEl = null;
+  }
+  if (typeof document !== "undefined" && typeof document.getElementById === "function") {
+    const stale = document.getElementById("sg-fork-origin-banner");
+    if (stale) stale.remove();
+  }
+}
+
+function sgShouldSuppressForkOriginSurface() {
+  if (!isExtensionEnabled || !isForkHandoffEnabled) return true;
+  if (typeof isOnSavedInfoPage === "function" && isOnSavedInfoPage()) return true;
+  if (typeof window !== "undefined" && window.location && window.location.pathname.includes("/gems/")) return true;
+  return false;
+}
+
+function sgRenderForkOriginBanner(origin) {
+  const safeUrl = sgSanitizeGeminiChatUrl(origin && origin.sourceUrl);
+  if (!safeUrl || sgShouldSuppressForkOriginSurface()) {
+    sgRemoveForkOriginBanner();
+    return null;
+  }
+  const safeTitle = (typeof sgNormalizeInstructionText === "function"
+    ? sgNormalizeInstructionText(origin.sourceTitle || "")
+    : String(origin.sourceTitle || "").trim()) || "Original conversation";
+
+  sgRemoveForkOriginBanner();
+
+  const linkEl = sgSkillEl("a", {
+    className: "sg-fork-origin-link",
+    href: safeUrl,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    title: `Open source chat: ${safeTitle}`,
+    textContent: safeTitle
+  });
+  const dismissBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-fork-origin-dismiss",
+    title: "Dismiss origin link",
+    "aria-label": "Dismiss origin link",
+    onClick: () => {
+      sgDismissForkOriginBanner();
+    }
+  }, sgCreateSvgIcon(SG_CLOSE_SVG_PATHS, 12));
+
+  _sgForkOriginBannerEl = sgSkillEl("div", {
+    id: "sg-fork-origin-banner",
+    className: "sg-fork-origin-banner",
+    role: "status"
+  }, [
+    sgCreateSvgIcon(SG_FORK_SVG_PATHS, 13),
+    sgSkillEl("span", { className: "sg-fork-origin-label", textContent: "Forked from:" }),
+    linkEl,
+    dismissBtn
+  ]);
+
+  if (document && document.body) {
+    document.body.appendChild(_sgForkOriginBannerEl);
+  }
+  return _sgForkOriginBannerEl;
+}
+
+async function sgDismissForkOriginBanner() {
+  const prevOrigin = _sgActiveForkOrigin;
+  _sgActiveForkOrigin = null;
+  sgRemoveForkOriginBanner();
+  const chatId = (prevOrigin && prevOrigin.boundChatId) || (typeof getCurrentChatId === "function" ? getCurrentChatId() : null);
+  if (chatId) {
+    const map = await sgReadForkOriginsMap();
+    if (Object.prototype.hasOwnProperty.call(map, chatId)) {
+      delete map[chatId];
+      await sgWriteForkOriginsMap(map);
+    }
+  }
+}
+
+async function sgBindForkOriginToCurrentChat(chatId) {
+  const cleanChatId = String(chatId || "").trim();
+  if (!cleanChatId || !_sgActiveForkOrigin) return false;
+  const safeUrl = sgSanitizeGeminiChatUrl(_sgActiveForkOrigin.sourceUrl) || sgBuildSafeGeminiChatUrl(_sgActiveForkOrigin.sourceChatId);
+  if (!safeUrl) return false;
+  if (_sgActiveForkOrigin.sourceChatId && cleanChatId === _sgActiveForkOrigin.sourceChatId) return false;
+
+  const entry = {
+    sourceChatId: String(_sgActiveForkOrigin.sourceChatId || ""),
+    sourceTitle: String(_sgActiveForkOrigin.sourceTitle || "Original conversation"),
+    sourceUrl: safeUrl,
+    createdAt: Number(_sgActiveForkOrigin.createdAt || Date.now())
+  };
+  _sgActiveForkOrigin.boundChatId = cleanChatId;
+  _sgLoadedOriginChatId = cleanChatId;
+  const map = await sgReadForkOriginsMap();
+  map[cleanChatId] = entry;
+  return sgWriteForkOriginsMap(map);
+}
+
+async function sgLoadForkOriginForCurrentChat(chatId) {
+  const cleanChatId = String(chatId || "").trim();
+  _sgLoadedOriginChatId = cleanChatId;
+  if (!cleanChatId) {
+    _sgActiveForkOrigin = null;
+    sgRemoveForkOriginBanner();
+    return null;
+  }
+  const map = await sgReadForkOriginsMap();
+  const entry = map && map[cleanChatId];
+  const safeUrl = entry ? sgSanitizeGeminiChatUrl(entry.sourceUrl) : "";
+  if (!entry || !safeUrl) {
+    _sgActiveForkOrigin = null;
+    sgRemoveForkOriginBanner();
+    return null;
+  }
+  _sgActiveForkOrigin = {
+    sourceChatId: String(entry.sourceChatId || ""),
+    sourceTitle: String(entry.sourceTitle || "Original conversation"),
+    sourceUrl: safeUrl,
+    createdAt: Number(entry.createdAt || Date.now()),
+    boundChatId: cleanChatId,
+    dismissed: false
+  };
+  return _sgActiveForkOrigin;
+}
+
+async function sgSyncForkOriginBannerForCurrentChat() {
+  if (sgShouldSuppressForkOriginSurface()) {
+    sgRemoveForkOriginBanner();
+    return;
+  }
+  const chatId = typeof getCurrentChatId === "function" ? getCurrentChatId() : null;
+  if (!chatId) {
+    _sgLoadedOriginChatId = "";
+    if (_sgActiveForkOrigin && !_sgActiveForkOrigin.dismissed && !_sgActiveForkOrigin.boundChatId) {
+      sgRenderForkOriginBanner(_sgActiveForkOrigin);
+    } else {
+      if (_sgActiveForkOrigin && _sgActiveForkOrigin.boundChatId) _sgActiveForkOrigin = null;
+      sgRemoveForkOriginBanner();
+    }
+    return;
+  }
+  if (_sgActiveForkOrigin && !_sgActiveForkOrigin.boundChatId && chatId !== _sgActiveForkOrigin.sourceChatId) {
+    await sgBindForkOriginToCurrentChat(chatId);
+  } else if (_sgLoadedOriginChatId !== chatId) {
+    await sgLoadForkOriginForCurrentChat(chatId);
+  }
+  if (_sgActiveForkOrigin && !_sgActiveForkOrigin.dismissed && (!_sgActiveForkOrigin.boundChatId || _sgActiveForkOrigin.boundChatId === chatId)) {
+    sgRenderForkOriginBanner(_sgActiveForkOrigin);
+  } else {
+    sgRemoveForkOriginBanner();
+  }
+}
+
 function sgBuildHandoffPayload(turns, options = {}) {
   const mode = options.mode === "bookmarked" || options.mode === "full" ? options.mode : "balanced";
   const maxTotalChars = Number.isFinite(Number(options.maxTotalChars)) ? Number(options.maxTotalChars) : 12000;
   const stripIntermediateCode = Boolean(options.stripIntermediateCode);
   const sourceTitle = sgNormalizeInstructionText(options.sourceTitle || "Gemini Conversation") || "Gemini Conversation";
+  const safeSourceUrl = sgSanitizeGeminiChatUrl(options.sourceUrl || "");
+  const sourceLinkLine = safeSourceUrl ? `Source link: ${safeSourceUrl}\n` : "";
 
   const selected = (Array.isArray(turns) ? turns : []).filter(t => {
     if (!t) return false;
@@ -1083,7 +1583,7 @@ function sgBuildHandoffPayload(turns, options = {}) {
   });
 
   if (selected.length === 0) {
-    return `${SG_HANDOFF_OPEN_TAG}\nSource conversation: ${sourceTitle}\nIncluded turns: (none selected)\n${SG_HANDOFF_CLOSE_TAG}\n\nNext request: `;
+    return `${SG_HANDOFF_OPEN_TAG}\nSource conversation: ${sourceTitle}\n${sourceLinkLine}Included turns: (none selected)\n${SG_HANDOFF_CLOSE_TAG}\n\nNext request: `;
   }
 
   const turnNums = selected.map(t => t.turnNumber).filter(n => typeof n === "number");
@@ -1091,7 +1591,7 @@ function sgBuildHandoffPayload(turns, options = {}) {
     ? `${selected.length} turn(s) (#${turnNums.join(", #")})${mode === "bookmarked" ? " [bookmarked]" : ""}`
     : `${selected.length} turn(s)`;
 
-  const headerBlock = `${SG_HANDOFF_OPEN_TAG}\nSource conversation: ${sourceTitle}\nIncluded turns: ${summaryLabel}\n`;
+  const headerBlock = `${SG_HANDOFF_OPEN_TAG}\nSource conversation: ${sourceTitle}\n${sourceLinkLine}Included turns: ${summaryLabel}\n`;
   const footerBlock = `\n${SG_HANDOFF_CLOSE_TAG}\n\nContinue from the hand-off context above. Follow all established decisions and constraints.\n\nNext request: `;
 
   if (mode === "full") {
@@ -1194,11 +1694,14 @@ async function sgLaunchForkHandoff(text, meta = {}) {
   const accountInfo = typeof sgGetCurrentAccountInfo === "function"
     ? sgGetCurrentAccountInfo()
     : { index: "0", email: null, label: "/u/0" };
+  const sourceChatId = meta.sourceChatId || (typeof getCurrentChatId === "function" ? getCurrentChatId() : null);
+  const sourceUrl = sgSanitizeGeminiChatUrl(meta.sourceUrl) || sgBuildSafeGeminiChatUrl(sourceChatId);
   const now = Date.now();
   const job = {
     text: String(text || ""),
-    sourceChatId: meta.sourceChatId || (typeof getCurrentChatId === "function" ? getCurrentChatId() : null),
+    sourceChatId,
     sourceTitle: meta.sourceTitle || "Gemini Conversation",
+    sourceUrl,
     accountIndex: accountInfo.index,
     accountEmail: accountInfo.email || null,
     createdAt: now,
@@ -1296,6 +1799,21 @@ async function sgCheckAndConsumePendingForkHandoff() {
       setPromptText(job.text);
     }
 
+    const safeOriginUrl = sgSanitizeGeminiChatUrl(job.sourceUrl) || sgBuildSafeGeminiChatUrl(job.sourceChatId);
+    if (safeOriginUrl) {
+      _sgActiveForkOrigin = {
+        sourceChatId: String(job.sourceChatId || ""),
+        sourceTitle: (typeof sgNormalizeInstructionText === "function"
+          ? sgNormalizeInstructionText(job.sourceTitle || "")
+          : String(job.sourceTitle || "").trim()) || "Original conversation",
+        sourceUrl: safeOriginUrl,
+        createdAt: Number(job.createdAt || Date.now()),
+        boundChatId: "",
+        dismissed: false
+      };
+      sgRenderForkOriginBanner(_sgActiveForkOrigin);
+    }
+
     if (typeof showToast === "function") {
       showToast("Hand-off context loaded. Review and add your next prompt.", "success");
     }
@@ -1320,16 +1838,30 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
   const chatInfo = typeof findActiveChatInfo === "function" ? findActiveChatInfo() : null;
   const sourceTitle = (chatInfo && chatInfo.title) || "Gemini Conversation";
   const sourceChatId = (chatInfo && chatInfo.id) || (typeof getCurrentChatId === "function" ? getCurrentChatId() : null);
+  const sourceUrl = sgBuildSafeGeminiChatUrl(sourceChatId);
 
   const bookmarkedCount = turns.filter(t => t.isBookmarked).length;
+  const validTurnNumSet = new Set(turns.map(t => t.turnNumber));
+  const initialSelectedNums = Array.isArray(initialConfig.selectedTurns)
+    ? initialConfig.selectedTurns.map(Number).filter(n => validTurnNumSet.has(n))
+    : [];
   let selMode = initialConfig.mode === "bookmarked" && bookmarkedCount > 0
     ? "bookmarked"
-    : (initialConfig.mode === "custom" ? "custom" : "range");
+    : (initialConfig.mode === "custom" || initialSelectedNums.length > 0 ? "custom" : "range");
   let upToTurn = Math.max(1, Math.min(turns.length, Number(initialConfig.upToTurn || turns.length)));
-  const customSelected = new Set(turns.slice(0, upToTurn).map(t => t.turnNumber));
-  let preset = "balanced_12k";
+  const customSelected = new Set(
+    initialSelectedNums.length > 0
+      ? initialSelectedNums
+      : turns.slice(0, upToTurn).map(t => t.turnNumber)
+  );
+  let preset = initialConfig.preset === "smart_checkpoint" || initialConfig.preset === "compact_6k" || initialConfig.preset === "full"
+    ? initialConfig.preset
+    : "balanced_12k";
   let stripIntermediateCode = false;
   let isManuallyEdited = false;
+  let aiInFlight = false;
+  let aiRequestSeq = 0;
+  let lastRecordsSnapshot = [];
 
   const previewArea = sgSkillEl("textarea", {
     className: "sg-fork-preview-area",
@@ -1347,13 +1879,60 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
     }))
   );
   rangeSelect.value = String(upToTurn);
+  rangeSelect.style.display = selMode === "range" ? "" : "none";
 
-  const checklistEl = sgSkillEl("div", { className: "sg-fork-checklist", style: selMode === "custom" ? "" : "display: none;" });
+  const checklistEl = sgSkillEl("div", { className: "sg-fork-checklist", style: selMode === "custom" ? "display: flex;" : "display: none;" });
   const presetSelect = sgSkillEl("select", { className: "sg-fork-select" }, [
+    sgSkillEl("option", { value: "smart_checkpoint", textContent: "Smart Checkpoint (AI 5-Section)" }),
     sgSkillEl("option", { value: "balanced_12k", textContent: "Balanced (~12k chars)" }),
     sgSkillEl("option", { value: "compact_6k", textContent: "Compact (~6k chars)" }),
     sgSkillEl("option", { value: "full", textContent: "Full Verbatim" })
   ]);
+  presetSelect.value = preset;
+
+  const focusInput = sgSkillEl("input", {
+    id: "sg-fork-focus-input",
+    type: "text",
+    className: "sg-fork-focus-input",
+    placeholder: "Optional focus (e.g. architecture decisions, bug fixes...)",
+    value: String(initialConfig.customFocus || "")
+  });
+  const aiStatusEl = sgSkillEl("span", {
+    id: "sg-fork-ai-status",
+    className: "sg-fork-ai-status",
+    textContent: ""
+  });
+  const aiGenerateBtn = sgSkillEl("button", {
+    id: "sg-fork-ai-generate-btn",
+    type: "button",
+    className: "sg-skills-btn sg-skills-btn-primary",
+    textContent: "Summarize with AI",
+    onClick: () => {
+      isManuallyEdited = false;
+      runSmartCheckpointSummarize();
+    }
+  });
+  const aiCancelBtn = sgSkillEl("button", {
+    id: "sg-fork-ai-cancel-btn",
+    type: "button",
+    className: "sg-skills-btn sg-skills-btn-secondary",
+    style: "display: none;",
+    textContent: "Cancel AI",
+    onClick: () => cancelActiveCheckpointRequest("Cancelled — using local 5-section checkpoint.")
+  });
+  const checkpointBar = sgSkillEl("div", {
+    id: "sg-fork-checkpoint-bar",
+    className: "sg-fork-checkpoint-bar",
+    style: preset === "smart_checkpoint" ? "display: flex;" : "display: none;"
+  }, [
+    focusInput,
+    sgSkillEl("div", { className: "sg-fork-checkpoint-actions" }, [
+      aiGenerateBtn,
+      aiCancelBtn,
+      aiStatusEl
+    ])
+  ]);
+
   const stripCodeCheckbox = sgSkillEl("input", {
     type: "checkbox",
     checked: stripIntermediateCode,
@@ -1363,6 +1942,35 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
       rebuildPreview();
     }
   });
+  const stripCodeLabel = sgSkillEl("label", {
+    className: "sg-fork-checkbox-label",
+    style: preset === "smart_checkpoint" ? "display: none;" : ""
+  }, [
+    stripCodeCheckbox,
+    sgSkillEl("span", { textContent: "Omit code blocks in older intermediate turns" })
+  ]);
+
+  const syncPresetUi = () => {
+    const isSmart = preset === "smart_checkpoint";
+    checkpointBar.style.display = isSmart ? "flex" : "none";
+    stripCodeLabel.style.display = isSmart ? "none" : "";
+  };
+
+  const cancelActiveCheckpointRequest = (statusMsg = "") => {
+    aiRequestSeq++;
+    const wasInFlight = aiInFlight;
+    aiInFlight = false;
+    aiGenerateBtn.disabled = false;
+    aiCancelBtn.style.display = "none";
+    if (statusMsg) aiStatusEl.textContent = statusMsg;
+    if (wasInFlight && typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+      try {
+        chrome.runtime.sendMessage({ type: "CANCEL_CHECKPOINT_SUMMARY" }, () => {
+          void chrome.runtime.lastError;
+        });
+      } catch (err) {}
+    }
+  };
 
   const updateStats = () => {
     const val = previewArea.value || "";
@@ -1383,16 +1991,40 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
 
   let rebuildSeq = 0;
   const rebuildPreview = async () => {
+    if (aiInFlight) cancelActiveCheckpointRequest("");
     const seq = ++rebuildSeq;
     const selectedNums = getSelectedTurnNumbers();
     if (!selectedNums.length) {
+      lastRecordsSnapshot = [];
       previewArea.value = "";
+      if (preset === "smart_checkpoint") aiStatusEl.textContent = "Select at least 1 turn.";
       updateStats();
       return;
     }
     statsLabel.textContent = "Extracting selected turns...";
     const records = await sgCollectTurnsForFork(selectedNums, turns);
     if (seq !== rebuildSeq) return;
+    lastRecordsSnapshot = records;
+    if (preset === "smart_checkpoint") {
+      const { originalChars, turnNumbers } = sgBuildCheckpointTranscript(records);
+      const fallbackBody = sgBuildStructuredCheckpointFallback(records, {
+        sourceTitle,
+        customFocus: focusInput.value || ""
+      });
+      const envelope = sgBuildSmartCheckpointEnvelope(fallbackBody, {
+        sourceTitle,
+        sourceUrl,
+        turnNumbers,
+        modelLabel: "Local 5-Section"
+      });
+      previewArea.value = envelope;
+      isManuallyEdited = false;
+      aiStatusEl.textContent = originalChars
+        ? `Structured 5-section draft ready (${originalChars.toLocaleString()} -> ${envelope.length.toLocaleString()} chars).`
+        : "Structured 5-section draft ready.";
+      updateStats();
+      return;
+    }
     const packMode = selMode === "bookmarked"
       ? (preset === "full" ? "full" : "bookmarked")
       : (preset === "full" ? "full" : "balanced");
@@ -1400,12 +2032,87 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
     const payload = sgBuildHandoffPayload(records, {
       mode: packMode,
       sourceTitle,
+      sourceUrl,
       maxTotalChars,
       stripIntermediateCode
     });
     previewArea.value = payload;
     isManuallyEdited = false;
     updateStats();
+  };
+
+  const runSmartCheckpointSummarize = async (recordsOverride = null) => {
+    const selectedNums = getSelectedTurnNumbers();
+    if (!selectedNums.length) {
+      aiStatusEl.textContent = "Select at least 1 turn first.";
+      return;
+    }
+    const records = Array.isArray(recordsOverride) && recordsOverride.length
+      ? recordsOverride
+      : (lastRecordsSnapshot.length ? lastRecordsSnapshot : await sgCollectTurnsForFork(selectedNums, turns));
+    lastRecordsSnapshot = records;
+    const { transcript, originalChars, turnNumbers } = sgBuildCheckpointTranscript(records);
+    if (!transcript) {
+      aiStatusEl.textContent = "No readable turn content found.";
+      return;
+    }
+
+    const canSendRuntime = typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.sendMessage === "function";
+    if (!canSendRuntime) {
+      aiStatusEl.textContent = "Using local 5-section checkpoint (background runtime unavailable).";
+      return;
+    }
+
+    const mySeq = ++aiRequestSeq;
+    aiInFlight = true;
+    aiGenerateBtn.disabled = true;
+    aiCancelBtn.style.display = "";
+    aiStatusEl.textContent = "Generating 5-section AI checkpoint via Temp Chat...";
+
+    try {
+      chrome.runtime.sendMessage({
+        type: "GENERATE_CHECKPOINT_SUMMARY",
+        transcript,
+        sourceTitle,
+        turnNumbers,
+        languageHint: "auto",
+        customFocus: (focusInput.value || "").trim()
+      }, resp => {
+        const runtimeErr = chrome.runtime && chrome.runtime.lastError ? chrome.runtime.lastError.message : "";
+        if (mySeq !== aiRequestSeq || !_sgForkModalOverlay) return;
+        aiInFlight = false;
+        aiGenerateBtn.disabled = false;
+        aiCancelBtn.style.display = "none";
+
+        if (!runtimeErr && resp && resp.success && resp.summary) {
+          const modelLabel = [resp.model, resp.thinkingLevel].filter(Boolean).join(" · ");
+          const packaged = sgBuildSmartCheckpointEnvelope(resp.summary, {
+            sourceTitle,
+            sourceUrl,
+            turnNumbers,
+            modelLabel
+          });
+          const ratioBadge = `${originalChars.toLocaleString()} -> ${packaged.length.toLocaleString()} chars${modelLabel ? ` · ${modelLabel}` : ""}`;
+          if (!isManuallyEdited) {
+            previewArea.value = packaged;
+            updateStats();
+            aiStatusEl.textContent = `AI Checkpoint ready (${ratioBadge})`;
+          } else {
+            aiStatusEl.textContent = `AI summary ready (${ratioBadge}) — manual edits preserved.`;
+          }
+          return;
+        }
+
+        const reason = runtimeErr || (resp && resp.error) || "worker unavailable";
+        aiStatusEl.textContent = `AI unavailable (${reason}) — kept local 5-section checkpoint.`;
+      });
+    } catch (err) {
+      if (mySeq !== aiRequestSeq) return;
+      aiInFlight = false;
+      aiGenerateBtn.disabled = false;
+      aiCancelBtn.style.display = "none";
+      aiStatusEl.textContent = `AI unavailable (${(err && err.message) || "send failed"}) — kept local 5-section checkpoint.`;
+    }
   };
 
   for (const t of turns) {
@@ -1467,10 +2174,12 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
   presetSelect.addEventListener("change", () => {
     preset = presetSelect.value || "balanced_12k";
     isManuallyEdited = false;
+    syncPresetUi();
     rebuildPreview();
   });
 
   const closeModal = () => {
+    if (aiInFlight) cancelActiveCheckpointRequest("");
     if (_sgForkModalOverlay) {
       _sgForkModalOverlay.remove();
       _sgForkModalOverlay = null;
@@ -1504,11 +2213,9 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
         presetSelect
       ]),
       checklistEl,
+      checkpointBar,
       sgSkillEl("div", { className: "sg-fork-option-row" }, [
-        sgSkillEl("label", { className: "sg-fork-checkbox-label" }, [
-          stripCodeCheckbox,
-          sgSkillEl("span", { textContent: "Omit code blocks in older intermediate turns" })
-        ]),
+        stripCodeLabel,
         statsLabel
       ]),
       previewArea
@@ -1541,7 +2248,8 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
         onClick: async () => {
           const text = previewArea.value;
           if (!text || !text.trim()) return;
-          await sgLaunchForkHandoff(text, { sourceChatId, sourceTitle });
+          if (aiInFlight) cancelActiveCheckpointRequest("");
+          await sgLaunchForkHandoff(text, { sourceChatId, sourceTitle, sourceUrl });
         }
       })
     ])
@@ -1557,6 +2265,9 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
   document.body.appendChild(overlay);
   _sgForkModalOverlay = overlay;
   await rebuildPreview();
+  if (preset === "smart_checkpoint" && initialConfig.autoSummarize && lastRecordsSnapshot.length > 0) {
+    runSmartCheckpointSummarize(lastRecordsSnapshot);
+  }
 }
 
 function sgCloseSelectiveExportModal() {
@@ -1924,6 +2635,7 @@ function sgRefreshOutlineAndForkUi(force = false) {
   } else {
     sgRemoveAllForkButtons();
   }
+  sgSyncForkOriginBannerForCurrentChat();
 }
 
 function sgDisconnectChatMutationObserver() {
@@ -1987,7 +2699,10 @@ function sgSetOutlineEnabled(enabled) {
 function sgSetForkHandoffEnabled(enabled) {
   isForkHandoffEnabled = Boolean(enabled);
   if (!isForkHandoffEnabled) {
+    _sgOutlineSelectMode = false;
     sgRemoveAllForkButtons();
+    sgRemoveForkOriginBanner();
+    sgUpdateOutlineCheckpointBar();
   }
   if (!isConversationOutlineEnabled && !isForkHandoffEnabled) {
     sgDisconnectChatMutationObserver();
@@ -2036,6 +2751,8 @@ function initOutlineAndForkSystem() {
             _sgForkCheckedPath = curPath;
             if (typeof isOnNewChatLanding === "function" && isOnNewChatLanding()) {
               sgCheckAndConsumePendingForkHandoff();
+            } else {
+              sgSyncForkOriginBannerForCurrentChat();
             }
           }
         }

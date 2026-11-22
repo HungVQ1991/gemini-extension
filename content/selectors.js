@@ -145,6 +145,54 @@ function sgGetSelectorHealthReport() {
   return out;
 }
 
+const SG_DIAG_DEFAULT_PROBE_KEYS = Object.freeze([
+  "promptInput", "inputAreaContainer", "sendButton",
+  "modeMenuButton", "inputAreaSwitch",
+  "sidebarScroller", "conversationsList", "tempChatButton", "newChatButton",
+  "userQuery", "modelResponse", "chatHistory",
+  "stopButton", "nativeSearchButtons"
+]);
+
+function sgRunSelectorDiagnosticsProbe(root = typeof document !== "undefined" ? document : null, keys = null) {
+  const keyList = Array.isArray(keys) && keys.length > 0 ? keys : SG_DIAG_DEFAULT_PROBE_KEYS;
+  const out = {};
+  for (const key of keyList) {
+    const list = _resolveSelectors(key);
+    const rt = _sgSelectorHealth.get(key);
+    if (!list.length || !root || typeof root.querySelector !== "function") {
+      out[key] = {
+        key,
+        status: "miss",
+        matchedIndex: -1,
+        matchedSelector: null,
+        primarySelector: list[0] || null,
+        runtimeFallbackCount: rt ? rt.count : 0
+      };
+      continue;
+    }
+    let matchedIdx = -1;
+    let matchedSel = null;
+    for (let i = 0; i < list.length; i++) {
+      try {
+        if (root.querySelector(list[i])) {
+          matchedIdx = i;
+          matchedSel = list[i];
+          break;
+        }
+      } catch (_e) {}
+    }
+    out[key] = {
+      key,
+      status: matchedIdx === 0 ? "primary" : (matchedIdx > 0 ? "fallback" : "miss"),
+      matchedIndex: matchedIdx,
+      matchedSelector: matchedSel,
+      primarySelector: list[0],
+      runtimeFallbackCount: rt ? rt.count : 0
+    };
+  }
+  return out;
+}
+
 if (typeof SG !== "undefined" && SG) {
   SG.selectors = Object.freeze({
     map: GEMINI_SELECTORS,
@@ -152,6 +200,7 @@ if (typeof SG !== "undefined" && SG) {
     query: domQuery,
     queryAll: domQueryAll,
     queryWithHealth: sgQueryWithHealth,
-    getHealthReport: sgGetSelectorHealthReport
+    getHealthReport: sgGetSelectorHealthReport,
+    runDiagnosticsProbe: sgRunSelectorDiagnosticsProbe
   });
 }

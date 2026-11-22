@@ -260,6 +260,11 @@
       "thinkingLevel": "low",
       "timeoutMs": 60000
     },
+    "checkpoint": {
+      "model": "hydrogen",
+      "thinkingLevel": "high",
+      "timeoutMs": 120000
+    },
     "orchestrate": {
       "planner": {
         "clean1Turn": {

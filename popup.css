@@ -1597,3 +1597,169 @@ body.dark-theme::-webkit-scrollbar-thumb:hover {
   padding: 12px 14px;
   justify-content: space-between;
 }
+
+.settings-section .shortcuts-row + .shortcuts-row {
+  margin-top: 8px;
+}
+
+.sg-backup-modal,
+.sg-diag-modal {
+  width: 344px;
+  max-width: calc(100vw - 16px);
+}
+
+.sg-backup-body {
+  padding: 12px 14px 14px;
+  max-height: 410px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sg-backup-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sg-backup-card-title {
+  font-family: var(--sg-font-flex);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.sg-backup-card-desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-hint);
+}
+
+.sg-backup-full-btn {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.sg-backup-preview {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(138, 180, 248, 0.08);
+  border: 1px solid rgba(138, 180, 248, 0.25);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-label);
+}
+
+.sg-diag-toolbar {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sg-diag-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sg-diag-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11.5px;
+}
+
+.sg-diag-body {
+  padding: 10px 14px 14px;
+  max-height: 330px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sg-diag-card {
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sg-diag-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sg-diag-card-title {
+  font-family: var(--sg-font-flex);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.sg-diag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-label);
+}
+
+.sg-diag-meta {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-hint);
+  word-break: break-word;
+}
+
+.sg-diag-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--sg-font-code);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.sg-diag-badge.is-ok {
+  background: rgba(129, 201, 149, 0.16);
+  color: #81c995;
+}
+
+.sg-diag-badge.is-warn {
+  background: rgba(253, 214, 99, 0.16);
+  color: #fdd663;
+}
+
+.sg-diag-badge.is-error {
+  background: rgba(242, 139, 130, 0.18);
+  color: #f28b82;
+}
+
+.sg-diag-badge.is-idle {
+  background: rgba(154, 160, 166, 0.16);
+  color: #9aa0a6;
+}
+
+.sg-diag-footer {
+  padding: 12px 14px;
+  gap: 8px;
+}
+
+.sg-diag-footer .primary-btn {
+  margin-left: auto;
+}

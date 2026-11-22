@@ -338,6 +338,14 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
       commandId: "fork_handoff"
     },
     {
+      id: "cmd_smart_checkpoint",
+      title: "Smart Checkpoint Handoff (AI Summary)",
+      subtitle: "Pick turns and compress them into a 5-section structured checkpoint for a new chat",
+      searchText: "smart checkpoint handoff ai summary compress turns fork origin context",
+      baseWeight: 22,
+      commandId: "smart_checkpoint"
+    },
+    {
       id: "cmd_selective_export",
       title: "Selective Export (Outline / Bookmarks)",
       subtitle: "Export chosen turns, bookmarked responses, or diagram turns to MD/PDF/DOCX/TXT",
@@ -848,6 +856,9 @@ async function sgExecuteCommandPaletteEntry(entry) {
         break;
       case "fork_handoff":
         if (typeof sgOpenForkHandoffModal === "function") await sgOpenForkHandoffModal();
+        break;
+      case "smart_checkpoint":
+        if (typeof sgOpenForkHandoffModal === "function") await sgOpenForkHandoffModal({ mode: "custom", preset: "smart_checkpoint" });
         break;
       case "toggle_outline": {
         if (typeof isConversationOutlineEnabled !== "undefined" && typeof sgSetOutlineEnabled === "function") {

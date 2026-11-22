@@ -839,15 +839,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Single batched chrome.storage.sync.get for all popup settings (33 -> 1 IPC)
-  const ALL_POPUP_SYNC_KEYS = [
-    "extensionEnabled",
-    ...toggleConfigs.map(cfg => cfg.storageKey),
-    "driveSyncEnabled",
-    "optimizeModel",
-    ...SHORTCUT_CONFIGS.flatMap(cfg => [cfg.storageKey, cfg.enabledKey])
-  ];
-  chrome.storage.sync.get(ALL_POPUP_SYNC_KEYS, res => {
+  function hydratePopupUiFromMap(res) {
     const safeRes = res || {};
     const isEnabled = safeRes.extensionEnabled !== false;
     if (masterToggle) masterToggle.checked = isEnabled;
@@ -861,7 +853,421 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
     updateSettingsState(isEnabled);
-  });
+  }
+
+  function downloadJsonObject(filename, obj) {
+    try {
+      if (typeof Blob !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+        return false;
+      }
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      if (document.body && typeof document.body.appendChild === "function") {
+        document.body.appendChild(a);
+        if (typeof a.click === "function") a.click();
+        if (typeof a.remove === "function") a.remove();
+      }
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url); } catch (_e) {}
+      }, 1000);
+      return true;
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function sendRuntimeMsg(payload, cb) {
+    try {
+      chrome.runtime.sendMessage(payload, resp => {
+        void chrome.runtime.lastError;
+        cb(resp || null);
+      });
+    } catch (err) {
+      cb({ ok: false, error: String(err && err.message || err) });
+    }
+  }
+
+  // Backup & Restore modal controller
+  const openBackupBtn = document.getElementById("open-backup-btn");
+  const backupModal = document.getElementById("backup-modal");
+  const backupCloseBtn = document.getElementById("backup-close-btn");
+  const backupDoneBtn = document.getElementById("backup-done-btn");
+  const backupStatus = document.getElementById("backup-status");
+  const backupExportBtn = document.getElementById("backup-export-btn");
+  const backupFileInput = document.getElementById("backup-file-input");
+  const backupChooseBtn = document.getElementById("backup-choose-file-btn");
+  const backupPreview = document.getElementById("backup-preview");
+  const backupApplyBtn = document.getElementById("backup-apply-btn");
+
+  let pendingRestorePayload = null;
+
+  function setBackupStatus(text, kind = "") {
+    if (!backupStatus) return;
+    backupStatus.textContent = text;
+    backupStatus.className = `sg-keybinds-status${kind === "error" ? " is-error" : (kind === "warn" ? " is-warn" : "")}`;
+  }
+
+  function renderBackupPreview(summary, meta, warnings = []) {
+    if (!backupPreview) return;
+    while (backupPreview.firstChild) backupPreview.removeChild(backupPreview.firstChild);
+    const lines = [
+      `Format v${meta?.schemaVersion || 1} (${meta?.exportedAt ? meta.exportedAt.slice(0, 10) : "valid"})`,
+      `Settings: ${summary.syncSettings} · Shortcuts: ${summary.shortcuts} · Folders: ${summary.folders}`,
+      `Prompts: ${summary.prompts} · Chains: ${summary.chains} · Bookmarks: ${summary.bookmarks} · Notes: ${summary.chatNotes}`,
+      `Custom Skills: ${summary.customSkills} · Custom Baselines: ${summary.customBaselines}`
+    ];
+    if (Array.isArray(warnings) && warnings.length > 0) {
+      lines.push(`Warnings: ${warnings.length} unsupported key(s) skipped`);
+    }
+    lines.forEach(line => {
+      const div = document.createElement("div");
+      div.textContent = line;
+      backupPreview.appendChild(div);
+    });
+    backupPreview.hidden = false;
+  }
+
+  function clearPendingRestore() {
+    pendingRestorePayload = null;
+    if (backupApplyBtn) backupApplyBtn.disabled = true;
+    if (backupPreview) {
+      while (backupPreview.firstChild) backupPreview.removeChild(backupPreview.firstChild);
+      backupPreview.hidden = true;
+    }
+    if (backupFileInput) backupFileInput.value = "";
+  }
+
+  function closeBackupModal(restoreFocus = true) {
+    if (backupModal) backupModal.style.display = "none";
+    if (restoreFocus && openBackupBtn && openBackupBtn.isConnected && typeof openBackupBtn.focus === "function") {
+      try { openBackupBtn.focus(); } catch (_e) {}
+    }
+  }
+
+  function handleSelectedBackupText(rawText) {
+    clearPendingRestore();
+    let parsed;
+    try {
+      parsed = JSON.parse(String(rawText || ""));
+    } catch (_err) {
+      setBackupStatus("Invalid JSON file.", "error");
+      return;
+    }
+    setBackupStatus("Validating backup schema…");
+    sendRuntimeMsg({ type: "IMPORT_UNIFIED_BACKUP", payload: parsed, dryRun: true }, resp => {
+      if (!resp || !resp.ok) {
+        const errText = resp && Array.isArray(resp.errors) && resp.errors.length > 0
+          ? resp.errors[0]
+          : (resp && resp.error ? resp.error : "Backup validation failed");
+        setBackupStatus(errText, "error");
+        return;
+      }
+      pendingRestorePayload = parsed;
+      renderBackupPreview(resp.summary, resp.meta, resp.warnings);
+      if (backupApplyBtn) backupApplyBtn.disabled = false;
+      setBackupStatus("Validation passed. Review counts below and click Restore Backup.", resp.warnings?.length ? "warn" : "");
+    });
+  }
+
+  if (openBackupBtn && backupModal) {
+    openBackupBtn.addEventListener("click", () => {
+      clearPendingRestore();
+      setBackupStatus("Export everything to JSON or select a backup file to preview before restoring.");
+      backupModal.style.display = "flex";
+    });
+    if (backupCloseBtn) backupCloseBtn.addEventListener("click", () => closeBackupModal(true));
+    if (backupDoneBtn) backupDoneBtn.addEventListener("click", () => closeBackupModal(true));
+    backupModal.addEventListener("click", e => {
+      if (e.target === backupModal) closeBackupModal(true);
+    });
+    document.addEventListener("keydown", e => {
+      if (backupModal.style.display === "flex" && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeBackupModal(true);
+      }
+    });
+    if (backupExportBtn) {
+      backupExportBtn.addEventListener("click", () => {
+        setBackupStatus("Generating backup…");
+        sendRuntimeMsg({ type: "EXPORT_UNIFIED_BACKUP" }, resp => {
+          if (!resp || !resp.ok || !resp.backup) {
+            setBackupStatus(resp && resp.error ? resp.error : "Export failed.", "error");
+            return;
+          }
+          const downloaded = downloadJsonObject(resp.filename || "gemini-power-suite-backup.json", resp.backup);
+          const c = resp.backup.counts || {};
+          setBackupStatus(
+            `${downloaded ? "Exported" : "Prepared"} backup (${c.syncSettings || 0} settings, ${c.folders || 0} folders, ${c.prompts || 0} prompts, ${c.bookmarks || 0} bookmarks).`
+          );
+        });
+      });
+    }
+    if (backupChooseBtn && backupFileInput) {
+      backupChooseBtn.addEventListener("click", () => backupFileInput.click());
+      backupFileInput.addEventListener("change", () => {
+        const file = backupFileInput.files && backupFileInput.files[0];
+        if (!file) return;
+        if (typeof file.text === "function") {
+          file.text().then(handleSelectedBackupText, () => setBackupStatus("Could not read file.", "error"));
+        } else if (typeof FileReader === "function") {
+          const reader = new FileReader();
+          reader.onload = () => handleSelectedBackupText(reader.result);
+          reader.onerror = () => setBackupStatus("Could not read file.", "error");
+          reader.readAsText(file);
+        }
+      });
+    }
+    if (backupApplyBtn) {
+      backupApplyBtn.addEventListener("click", () => {
+        if (!pendingRestorePayload) return;
+        backupApplyBtn.disabled = true;
+        setBackupStatus("Restoring backup…");
+        sendRuntimeMsg({ type: "IMPORT_UNIFIED_BACKUP", payload: pendingRestorePayload, dryRun: false }, resp => {
+          if (!resp || !resp.ok) {
+            const errText = resp && Array.isArray(resp.errors) && resp.errors.length > 0
+              ? resp.errors[0]
+              : (resp && resp.error ? resp.error : "Restore failed");
+            setBackupStatus(errText, "error");
+            backupApplyBtn.disabled = false;
+            return;
+          }
+          if (resp.syncToWrite) hydratePopupUiFromMap(resp.syncToWrite);
+          clearPendingRestore();
+          setBackupStatus("Backup restored! Refresh open Gemini tabs to apply local data.");
+        });
+      });
+    }
+    window._sgBackupTestHook = { handleSelectedBackupText };
+  }
+
+  // System Diagnostics modal controller
+  const openDiagBtn = document.getElementById("open-diagnostics-btn");
+  const diagModal = document.getElementById("diagnostics-modal");
+  const diagCloseBtn = document.getElementById("diagnostics-close-btn");
+  const diagDoneBtn = document.getElementById("diagnostics-done-btn");
+  const diagRefreshBtn = document.getElementById("diagnostics-refresh-btn");
+  const diagProbeModelsBtn = document.getElementById("diagnostics-probe-models-btn");
+  const diagSummaryEl = document.getElementById("diagnostics-summary");
+  const diagBodyEl = document.getElementById("diagnostics-body");
+  const diagCopyBtn = document.getElementById("diagnostics-copy-btn");
+  const diagExportBtn = document.getElementById("diagnostics-export-btn");
+
+  let lastDiagResponse = null;
+
+  function statusBadgeClass(status) {
+    const s = String(status || "").toLowerCase();
+    if (s === "ok" || s === "healthy" || s === "valid" || s === "primary") return "is-ok";
+    if (s === "fallback" || s === "degraded" || s === "warn" || s === "warning") return "is-warn";
+    if (s === "idle" || s === "no_gemini_tab") return "is-idle";
+    return "is-error";
+  }
+
+  function formatBytesCompact(n) {
+    if (!Number.isFinite(Number(n))) return "n/a";
+    const num = Number(n);
+    if (num < 1024) return `${num} B`;
+    return `${(num / 1024).toFixed(1)} KB`;
+  }
+
+  function makeDiagCard(title, badgeText, badgeKind) {
+    const card = document.createElement("div");
+    card.className = "sg-diag-card";
+    const head = document.createElement("div");
+    head.className = "sg-diag-card-head";
+    const titleEl = document.createElement("span");
+    titleEl.className = "sg-diag-card-title";
+    titleEl.textContent = title;
+    head.appendChild(titleEl);
+    if (badgeText) {
+      const badge = document.createElement("span");
+      badge.className = `sg-diag-badge ${statusBadgeClass(badgeKind || badgeText)}`;
+      badge.textContent = badgeText;
+      head.appendChild(badge);
+    }
+    card.appendChild(head);
+    return card;
+  }
+
+  function appendDiagRow(card, leftText, rightBadgeText, badgeKind) {
+    const row = document.createElement("div");
+    row.className = "sg-diag-row";
+    const left = document.createElement("span");
+    left.textContent = leftText;
+    row.appendChild(left);
+    if (rightBadgeText) {
+      const badge = document.createElement("span");
+      badge.className = `sg-diag-badge ${statusBadgeClass(badgeKind || rightBadgeText)}`;
+      badge.textContent = rightBadgeText;
+      row.appendChild(badge);
+    }
+    card.appendChild(row);
+  }
+
+  function appendDiagMeta(card, text) {
+    const p = document.createElement("div");
+    p.className = "sg-diag-meta";
+    p.textContent = text;
+    card.appendChild(p);
+  }
+
+  function renderDiagnosticsReport(report) {
+    if (!diagBodyEl || !report) return;
+    while (diagBodyEl.firstChild) diagBodyEl.removeChild(diagBodyEl.firstChild);
+
+    if (diagSummaryEl) {
+      const overall = String(report.overallStatus || "unknown").toUpperCase();
+      diagSummaryEl.textContent = `Status: ${overall} · v${report.extensionVersion || "2.0.0"}`;
+      diagSummaryEl.className = `sg-keybinds-status${report.overallStatus === "error" ? " is-error" : (report.overallStatus === "degraded" ? " is-warn" : "")}`;
+    }
+
+    // 1. Active Gemini Tab & UI
+    const tab = report.activeGeminiTab || {};
+    const tabCard = makeDiagCard(
+      "Active Gemini Tab",
+      tab.found ? (tab.contentScriptReachable ? "connected" : "error") : "no_gemini_tab",
+      tab.found ? (tab.contentScriptReachable ? "ok" : "error") : "idle"
+    );
+    appendDiagMeta(tabCard, tab.found ? `${tab.sanitizedUrl || "gemini.google.com"}` : "Open a gemini.google.com tab to probe live selectors.");
+    if (tab.ui) {
+      appendDiagMeta(
+        tabCard,
+        `UI: Counter=${tab.ui.usageCounterMounted ? "Yes" : "No"} · Orchestrate=${tab.ui.orchestrateBtnMounted ? "Yes" : "No"} · Periodic=${tab.ui.periodicPickerActive ? "On" : "Off"}`
+      );
+    }
+    diagBodyEl.appendChild(tabCard);
+
+    // 2. DOM Selector Health
+    const sel = report.selectors || {};
+    const selCard = makeDiagCard("DOM Selector Health", sel.overallStatus || "idle");
+    if (Array.isArray(sel.groups) && sel.groups.length > 0) {
+      sel.groups.forEach(g => {
+        const detail = `${g.status.toUpperCase()} (${g.primaryCount}p/${g.fallbackCount}f/${g.missCount}m)`;
+        appendDiagRow(selCard, g.label, detail, g.status);
+      });
+    } else {
+      appendDiagMeta(selCard, "Selector probe unavailable without an active Gemini tab.");
+    }
+    diagBodyEl.appendChild(selCard);
+
+    // 3. Background Workers & Pools
+    const sw = report.serviceWorker || {};
+    const swBadge = (sw.busyOrchPools || 0) > 0 ? "busy" : "ok";
+    const swCard = makeDiagCard("Workers & Service Worker", swBadge, (sw.busyOrchPools || 0) > 0 ? "warn" : "ok");
+    appendDiagMeta(
+      swCard,
+      `Uptime: ${sw.uptimeSec !== null ? `${sw.uptimeSec}s` : "n/a"} · Alarms: ${sw.alarmsCount || 0} · Orch Pools: ${sw.activeOrchPools || 0} (busy ${sw.busyOrchPools || 0})`
+    );
+    const tc = sw.tempTabCounts || {};
+    appendDiagMeta(swCard, `Temp Tabs: opt=${tc.opt || 0}, orch=${tc.orch || 0}, scrape=${tc.scrape || 0}, audit=${tc.audit || 0}`);
+    if (Array.isArray(sw.recentEvents) && sw.recentEvents.length > 0) {
+      sw.recentEvents.slice(-4).reverse().forEach(ev => {
+        appendDiagMeta(swCard, `[${ev.level}] ${ev.scope}:${ev.code} ${ev.message}`);
+      });
+    } else {
+      appendDiagMeta(swCard, "Recent worker events: 0 errors.");
+    }
+    diagBodyEl.appendChild(swCard);
+
+    // 4. Model Routing & Live Feasibility
+    const mr = report.modelRouting || {};
+    const mrCard = makeDiagCard("Model Routing", mr.valid ? "valid" : "error");
+    appendDiagMeta(mrCard, `Source: ${mr.source || "unknown"}`);
+    if (mr.summary && mr.summary.optimize) {
+      const optStr = Object.entries(mr.summary.optimize).map(([k, v]) => `${k}=${v}`).join(" | ");
+      appendDiagMeta(mrCard, `Optimize: ${optStr}`);
+    }
+    if (mr.feasibility) {
+      appendDiagMeta(
+        mrCard,
+        `Live Models: ${(mr.feasibility.feasibleModelNames || []).join(", ") || "(none)"} (excluded ${mr.feasibility.excludedCount || 0})`
+      );
+    }
+    diagBodyEl.appendChild(mrCard);
+
+    // 5. Storage Footprint
+    const st = report.storage || {};
+    const stCard = makeDiagCard("Storage Footprint", "ok");
+    appendDiagMeta(stCard, `Sync: ${formatBytesCompact(st.syncBytesInUse)} · Local: ${formatBytesCompact(st.localBytesInUse)}`);
+    const c = st.counts || {};
+    appendDiagMeta(stCard, `Folders=${c.folders || 0}, Prompts=${c.prompts || 0}, Chains=${c.chains || 0}, Bookmarks=${c.bookmarks || 0}, Notes=${c.chatNotes || 0}`);
+    diagBodyEl.appendChild(stCard);
+  }
+
+  function runPopupDiagnostics({ probeModels = false } = {}) {
+    if (!diagSummaryEl) return;
+    diagSummaryEl.textContent = probeModels ? "Running diagnostics + probing Gemini model menu…" : "Running diagnostics…";
+    diagSummaryEl.className = "sg-keybinds-status";
+    sendRuntimeMsg({ type: "RUN_SYSTEM_DIAGNOSTICS", probeModels, reloadRouting: probeModels }, resp => {
+      if (!resp || !resp.ok || !resp.report) {
+        diagSummaryEl.textContent = resp && resp.error ? resp.error : "Diagnostics failed.";
+        diagSummaryEl.className = "sg-keybinds-status is-error";
+        return;
+      }
+      lastDiagResponse = resp;
+      renderDiagnosticsReport(resp.report);
+    });
+  }
+
+  function closeDiagModal(restoreFocus = true) {
+    if (diagModal) diagModal.style.display = "none";
+    if (restoreFocus && openDiagBtn && openDiagBtn.isConnected && typeof openDiagBtn.focus === "function") {
+      try { openDiagBtn.focus(); } catch (_e) {}
+    }
+  }
+
+  if (openDiagBtn && diagModal) {
+    openDiagBtn.addEventListener("click", () => {
+      diagModal.style.display = "flex";
+      runPopupDiagnostics({ probeModels: false });
+    });
+    if (diagCloseBtn) diagCloseBtn.addEventListener("click", () => closeDiagModal(true));
+    if (diagDoneBtn) diagDoneBtn.addEventListener("click", () => closeDiagModal(true));
+    if (diagRefreshBtn) diagRefreshBtn.addEventListener("click", () => runPopupDiagnostics({ probeModels: false }));
+    if (diagProbeModelsBtn) diagProbeModelsBtn.addEventListener("click", () => runPopupDiagnostics({ probeModels: true }));
+    if (diagCopyBtn) {
+      diagCopyBtn.addEventListener("click", () => {
+        const text = lastDiagResponse?.formattedText || "";
+        if (!text) return;
+        if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          navigator.clipboard.writeText(text).then(() => {
+            if (diagSummaryEl) diagSummaryEl.textContent = "Diagnostics report copied to clipboard.";
+          }).catch(() => {});
+        }
+      });
+    }
+    if (diagExportBtn) {
+      diagExportBtn.addEventListener("click", () => {
+        if (!lastDiagResponse || !lastDiagResponse.report) return;
+        const day = new Date().toISOString().slice(0, 10);
+        const ok = downloadJsonObject(`gemini-power-suite-diagnostics-${day}.json`, lastDiagResponse.report);
+        if (diagSummaryEl && ok) diagSummaryEl.textContent = "Exported sanitized diagnostics JSON.";
+      });
+    }
+    diagModal.addEventListener("click", e => {
+      if (e.target === diagModal) closeDiagModal(true);
+    });
+    document.addEventListener("keydown", e => {
+      if (diagModal.style.display === "flex" && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeDiagModal(true);
+      }
+    });
+  }
+
+  // Single batched chrome.storage.sync.get for all popup settings (33 -> 1 IPC)
+  const ALL_POPUP_SYNC_KEYS = [
+    "extensionEnabled",
+    ...toggleConfigs.map(cfg => cfg.storageKey),
+    "driveSyncEnabled",
+    "optimizeModel",
+    ...SHORTCUT_CONFIGS.flatMap(cfg => [cfg.storageKey, cfg.enabledKey])
+  ];
+  chrome.storage.sync.get(ALL_POPUP_SYNC_KEYS, hydratePopupUiFromMap);
 
   // 4. Collapsible Sections & Real-time Filter Search
   const sections = Array.from(document.querySelectorAll(".settings-section"));

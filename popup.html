@@ -331,6 +331,19 @@
                 </div>
             </div>
 
+            <!-- Backup & Diagnostics Section -->
+            <div class="settings-section" id="backup-diagnostics-settings">
+                <h3>Backup &amp; Diagnostics</h3>
+                <div class="setting-item shortcuts-row" data-tooltip="Export or restore all settings, shortcuts, folders, prompts, chains, bookmarks, notes, and custom skills in one JSON file.">
+                    <span>Unified Backup</span>
+                    <button type="button" id="open-backup-btn" class="action-btn">Backup / Restore</button>
+                </div>
+                <div class="setting-item shortcuts-row" data-tooltip="Inspect live Gemini DOM selector health, background worker pools, model routing, and storage usage.">
+                    <span>System Diagnostics</span>
+                    <button type="button" id="open-diagnostics-btn" class="action-btn">Inspect</button>
+                </div>
+            </div>
+
             <p id="sg-popup-no-results" class="sg-popup-no-results" hidden>No matching settings</p>
         </div>
     </div>
@@ -372,7 +385,61 @@
         </div>
     </div>
 
+    <!-- Backup & Restore Modal -->
+    <div id="backup-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content sg-backup-modal" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title">
+            <div class="modal-header">
+                <h3 id="backup-modal-title">Unified Backup &amp; Restore</h3>
+                <button type="button" class="modal-close-btn" id="backup-close-btn" aria-label="Close backup modal">&times;</button>
+            </div>
+            <div class="modal-body sg-backup-body">
+                <div id="backup-status" class="sg-keybinds-status" role="status">Export everything to JSON or select a backup file to preview before restoring.</div>
+                <div class="sg-backup-card">
+                    <div class="sg-backup-card-title">Export</div>
+                    <p class="sg-backup-card-desc">Download settings, shortcuts, folders, prompts, chains, bookmarks, chat notes, and custom skills/baselines.</p>
+                    <button type="button" id="backup-export-btn" class="primary-btn sg-backup-full-btn">Export JSON Backup</button>
+                </div>
+                <div class="sg-backup-card">
+                    <div class="sg-backup-card-title">Restore</div>
+                    <p class="sg-backup-card-desc">Validate backup schema first, preview item counts, then apply safely.</p>
+                    <input type="file" id="backup-file-input" accept="application/json,.json" hidden>
+                    <button type="button" id="backup-choose-file-btn" class="secondary-btn sg-backup-full-btn">Choose Backup File</button>
+                    <div id="backup-preview" class="sg-backup-preview" hidden></div>
+                    <button type="button" id="backup-apply-btn" class="primary-btn sg-backup-full-btn" disabled>Restore Backup</button>
+                </div>
+            </div>
+            <div class="modal-footer sg-keybinds-footer">
+                <span></span>
+                <button type="button" id="backup-done-btn" class="secondary-btn">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Diagnostics Modal -->
+    <div id="diagnostics-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content sg-diag-modal" role="dialog" aria-modal="true" aria-labelledby="diagnostics-modal-title">
+            <div class="modal-header">
+                <h3 id="diagnostics-modal-title">System Diagnostics</h3>
+                <button type="button" class="modal-close-btn" id="diagnostics-close-btn" aria-label="Close diagnostics modal">&times;</button>
+            </div>
+            <div class="sg-diag-toolbar">
+                <div id="diagnostics-summary" class="sg-keybinds-status" role="status">Ready to inspect active tab, workers, and routing.</div>
+                <div class="sg-diag-actions">
+                    <button type="button" id="diagnostics-refresh-btn" class="secondary-btn">Refresh</button>
+                    <button type="button" id="diagnostics-probe-models-btn" class="secondary-btn">+ Check Models</button>
+                </div>
+            </div>
+            <div class="modal-body sg-diag-body" id="diagnostics-body"></div>
+            <div class="modal-footer sg-diag-footer">
+                <button type="button" id="diagnostics-copy-btn" class="secondary-btn">Copy</button>
+                <button type="button" id="diagnostics-export-btn" class="secondary-btn">Export JSON</button>
+                <button type="button" id="diagnostics-done-btn" class="primary-btn">Done</button>
+            </div>
+        </div>
+    </div>
+
     <script src="lib/model-routing.js"></script>
+    <script src="lib/backup-diagnostics.js"></script>
     <script src="popup.js"></script>
 </body>
 

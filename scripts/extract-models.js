@@ -109,6 +109,10 @@ function formatValidationSummary(loaded) {
   }
   const gp = routing.resolveGrammarProfile(cfg);
   lines.push(`  - ${"grammar".padEnd(17)} -> ${gp.model} / ${gp.thinkingLevel} (${gp.badgeLabel}, ${gp.timeoutMs}ms)`);
+  const cp = typeof routing.resolveCheckpointProfile === "function" ? routing.resolveCheckpointProfile(cfg) : null;
+  if (cp) {
+    lines.push(`  - ${"checkpoint".padEnd(17)} -> ${cp.model} / ${cp.thinkingLevel} (${cp.badgeLabel}, ${cp.timeoutMs}ms)`);
+  }
   const pp = routing.resolveOrchestratePlannerProfile(cfg);
   lines.push(`  - ${"orch.planner.1t".padEnd(17)} -> ${pp.model} (fallback: ${cfg.tasks.orchestrate.planner.clean1Turn.fallbackModel}) / ${pp.thinkingLevel} (${pp.timeoutMs}ms)`);
   const qs = routing.resolveOrchestrateSubAgentProfile(null, null, "quota_saver", cfg);
