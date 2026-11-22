@@ -105,14 +105,107 @@ function sgOrchFence(text) {
   return `${fence}\n${str}\n${fence}`;
 }
 
+function sgOrchGetModelRouting() {
+  if (sgOrchGetModelRouting._config) return sgOrchGetModelRouting._config;
+  return {
+    models: {
+      hydrogen: {
+        id: "hydrogen", symbol: "H", badgeLabel: "4 Hydrogen",
+        aliases: ["h", "4 hydrogen", "flash-lite", "flash lite", "fast", "flash"],
+        fallbackOrder: ["neon", "carbon"]
+      },
+      neon: {
+        id: "neon", symbol: "Ne", badgeLabel: "4 Neon",
+        aliases: ["ne", "4 neon", "thinking"],
+        fallbackOrder: ["hydrogen", "carbon"]
+      },
+      carbon: {
+        id: "carbon", symbol: "C", badgeLabel: "4 Carbon",
+        aliases: ["c", "4 carbon", "pro", "3.1 pro"],
+        fallbackOrder: ["neon", "hydrogen"]
+      },
+      argon: {
+        id: "argon", symbol: "Ar", badgeLabel: "4 Argon",
+        aliases: ["ar", "4 argon", "deep think"],
+        fallbackOrder: ["neon", "hydrogen"]
+      }
+    },
+    thinkingLevels: {
+      minimal: { id: "minimal", label: "Minimal" },
+      low: { id: "low", label: "Low" },
+      medium: { id: "medium", label: "Medium" },
+      high: { id: "high", label: "High" },
+      extra: { id: "extra", label: "Extra" }
+    },
+    tasks: {
+      orchestrate: {
+        planner: {
+          clean1Turn: { model: "neon", fallbackModel: "hydrogen", thinkingLevel: "medium" }
+        },
+        policies: {
+          quota_saver: {
+            label: "Quota Saver (4 H)",
+            description: "Force Sub-Agents onto 4 Hydrogen · Low to preserve Pro & Ultra quota",
+            model: "hydrogen",
+            thinkingLevel: "low"
+          },
+          adaptive: {
+            label: "Adaptive (H / Ne)",
+            description: "Allow Planner to assign 4 Hydrogen or 4 Neon per sub-agent task",
+            defaultModel: "hydrogen",
+            defaultThinkingLevel: "low",
+            plannerPromptModels: ["hydrogen", "neon"],
+            allowedModels: ["hydrogen", "neon", "carbon"],
+            plannerPromptThinkingLevels: ["low", "medium", "high"],
+            allowedThinkingLevels: ["low", "medium", "high", "extra"]
+          }
+        }
+      }
+    }
+  };
+}
+
+function sgOrchHydrateModelRoutingConfig() {
+  if (typeof SG_IS_SILENT_BG_WORKER_TAB !== "undefined" && SG_IS_SILENT_BG_WORKER_TAB) return;
+  if (sgOrchHydrateModelRoutingConfig._started) return;
+  if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") return;
+  sgOrchHydrateModelRoutingConfig._started = true;
+  try {
+    Promise.resolve(chrome.runtime.sendMessage({ type: "GET_MODEL_ROUTING_CONFIG" })).then(res => {
+      if (res && res.config && res.config.models && res.config.tasks?.orchestrate) {
+        sgOrchGetModelRouting._config = res.config;
+      }
+    }).catch(() => {});
+  } catch (_e) {}
+}
+
+function sgOrchResolveCanonicalModel(rawModel) {
+  const routing = sgOrchGetModelRouting();
+  const models = routing.models || {};
+  const norm = String(rawModel || "").toLowerCase().trim();
+  if (!norm) return null;
+  if (models[norm]) return norm;
+  if (/\b(carbon|pro)\b/.test(norm)) return models.carbon ? "carbon" : null;
+  if (/\b(neon|thinking)\b/.test(norm)) return models.neon ? "neon" : null;
+  if (/\b(argon|deep\s*think)\b/.test(norm)) return models.argon ? "argon" : (models.neon ? "neon" : null);
+  if (/\b(hydrogen|fast|flash)\b/.test(norm)) return models.hydrogen ? "hydrogen" : null;
+  for (const [id, entry] of Object.entries(models)) {
+    if (entry.symbol && norm === entry.symbol.toLowerCase()) return id;
+    if (Array.isArray(entry.aliases) && entry.aliases.some(a => norm.includes(String(a).toLowerCase()))) return id;
+  }
+  return null;
+}
+
 function sgOrchIsModelUnlocked(modelName) {
-  const norm = String(modelName || "hydrogen").toLowerCase().trim();
-  if (norm === "hydrogen" || norm === "flash" || norm === "fast") return true;
+  const routing = sgOrchGetModelRouting();
+  const canon = sgOrchResolveCanonicalModel(modelName) || "hydrogen";
+  if (canon === "hydrogen") return true;
   if (typeof sgPeriodicLoadCatalog === "function") {
     try {
       const cat = sgPeriodicLoadCatalog();
       if (cat && cat.scanned && cat.elements && typeof cat.elements === "object") {
-        const sym = norm === "neon" || norm === "thinking" ? "Ne" : (norm === "carbon" || norm === "pro" ? "C" : (norm === "argon" ? "Ar" : "H"));
+        const entryCfg = routing.models?.[canon];
+        const sym = entryCfg?.symbol || (canon === "neon" ? "Ne" : (canon === "carbon" ? "C" : (canon === "argon" ? "Ar" : "H")));
         const entry = cat.elements[sym];
         if (entry && entry.locked) return false;
       }
@@ -122,34 +215,61 @@ function sgOrchIsModelUnlocked(modelName) {
 }
 
 function sgOrchNormalizeSubAgentModel(rawModel, modelPolicy) {
-  if (modelPolicy !== "adaptive") return "hydrogen";
-  const norm = String(rawModel || "").toLowerCase().trim();
-  if (/\b(carbon|pro)\b/.test(norm)) {
-    return sgOrchIsModelUnlocked("carbon") ? "carbon" : (sgOrchIsModelUnlocked("neon") ? "neon" : "hydrogen");
+  const routing = sgOrchGetModelRouting();
+  const policies = routing.tasks?.orchestrate?.policies || {};
+  if (modelPolicy !== "adaptive") {
+    return policies.quota_saver?.model || "hydrogen";
   }
-  if (/\b(neon|thinking|argon)\b/.test(norm)) {
-    return sgOrchIsModelUnlocked("neon") ? "neon" : "hydrogen";
+  const adaptive = policies.adaptive || {};
+  const allowed = Array.isArray(adaptive.allowedModels) && adaptive.allowedModels.length > 0
+    ? adaptive.allowedModels
+    : ["hydrogen", "neon", "carbon"];
+  const defModel = adaptive.defaultModel || "hydrogen";
+  const req = sgOrchResolveCanonicalModel(rawModel) || defModel;
+  const entry = routing.models?.[req];
+  const candidates = [
+    req,
+    ...(Array.isArray(entry?.fallbackOrder) ? entry.fallbackOrder : []),
+    defModel
+  ];
+  for (const cand of candidates) {
+    if (allowed.includes(cand) && sgOrchIsModelUnlocked(cand)) {
+      return cand;
+    }
   }
-  return "hydrogen";
+  return defModel;
 }
 
 function sgOrchNormalizeThinkingLevel(rawLevel, modelPolicy) {
-  if (modelPolicy !== "adaptive") return "low";
+  const routing = sgOrchGetModelRouting();
+  const policies = routing.tasks?.orchestrate?.policies || {};
+  if (modelPolicy !== "adaptive") {
+    return policies.quota_saver?.thinkingLevel || "low";
+  }
+  const adaptive = policies.adaptive || {};
+  const allowed = Array.isArray(adaptive.allowedThinkingLevels) && adaptive.allowedThinkingLevels.length > 0
+    ? adaptive.allowedThinkingLevels
+    : ["low", "medium", "high", "extra"];
+  const defThink = adaptive.defaultThinkingLevel || "low";
   const norm = String(rawLevel || "").toLowerCase().trim();
-  if (/\b(extra|max|siêu|tối đa)\b/.test(norm)) return "extra";
-  if (/\b(high|extended|cao|mở rộng)\b/.test(norm)) return "high";
-  if (/\b(medium|trung bình|vừa)\b/.test(norm)) return "medium";
-  return "low";
+  let matched = defThink;
+  if (/\b(extra|max|maximum|ultra|siêu|rất cao|tối đa)\b/.test(norm)) matched = "extra";
+  else if (/\b(high|extended|cao|mở rộng)\b/.test(norm)) matched = "high";
+  else if (/\b(medium|balanced|trung bình|vừa)\b/.test(norm)) matched = "medium";
+  else if (/\b(minimal|min|tối thiểu)\b/.test(norm)) matched = "minimal";
+  else if (/\b(low|standard|thấp|tiêu chuẩn)\b/.test(norm)) matched = "low";
+  return allowed.includes(matched) ? matched : defThink;
 }
 
 function sgOrchFormatModelBadge(model, thinkingLevel) {
-  const m = String(model || "hydrogen").toLowerCase();
-  const label = m === "neon" || m === "thinking"
-    ? "4 Neon"
-    : (m === "carbon" || m === "pro" ? "4 Carbon" : (m === "argon" ? "4 Argon" : "4 Hydrogen"));
+  const routing = sgOrchGetModelRouting();
+  const canon = sgOrchResolveCanonicalModel(model) || "hydrogen";
+  const mObj = routing.models?.[canon];
+  const label = mObj?.badgeLabel
+    || (canon === "neon" ? "4 Neon" : (canon === "carbon" ? "4 Carbon" : (canon === "argon" ? "4 Argon" : "4 Hydrogen")));
   const t = String(thinkingLevel || "low").toLowerCase();
-  const tCap = t.charAt(0).toUpperCase() + t.slice(1);
-  return `${label} · ${tCap}`;
+  const tLabel = routing.thinkingLevels?.[t]?.label || (t.charAt(0).toUpperCase() + t.slice(1));
+  return `${label} · ${tLabel}`;
 }
 
 async function sgOrchLoadAvailableSkills() {
@@ -454,10 +574,20 @@ function sgBuildOrchestratorPlannerPrompt(userPrompt, cfg, skillsList = [], conv
     }
   }
 
+  const adaptivePolicy = sgOrchGetModelRouting().tasks?.orchestrate?.policies?.adaptive || {};
+  const promptModelChoices = Array.isArray(adaptivePolicy.plannerPromptModels) && adaptivePolicy.plannerPromptModels.length > 0
+    ? adaptivePolicy.plannerPromptModels
+    : ["hydrogen", "neon"];
+  const promptThinkChoices = Array.isArray(adaptivePolicy.plannerPromptThinkingLevels) && adaptivePolicy.plannerPromptThinkingLevels.length > 0
+    ? adaptivePolicy.plannerPromptThinkingLevels
+    : ["low", "medium", "high"];
+  const modelPipeList = promptModelChoices.join("|");
+  const thinkPipeList = promptThinkChoices.join("|");
+
   // COMPACT TRIGGER INJECTOR (Cases 2, 3A, 5A: @orchestrate-mode is pre-loaded)
   if (readiness && readiness.orchestrateReady) {
     const routingSpec = allowAdaptive
-      ? "adaptive (include MODEL: hydrogen|neon & THINKING: low|medium|high)"
+      ? `adaptive (include MODEL: ${modelPipeList} & THINKING: ${thinkPipeList})`
       : "quota_saver (omit MODEL & THINKING)";
     const schemaFields = allowAdaptive
       ? "ID, ROLE, MODEL, THINKING, SKILL, TASK"
@@ -546,8 +676,8 @@ function sgBuildOrchestratorPlannerPrompt(userPrompt, cfg, skillsList = [], conv
   ];
   if (allowAdaptive) {
     templateBlockLines.push(
-      "MODEL: [hydrogen | neon]",
-      "THINKING: [low | medium | high]"
+      `MODEL: [${promptModelChoices.join(" | ")}]`,
+      `THINKING: [${promptThinkChoices.join(" | ")}]`
     );
   }
   templateBlockLines.push(
@@ -1329,9 +1459,18 @@ function sgOpenOrchestratorConfigPopover(anchorEl = null) {
     { value: 4, label: "4 Agents", title: "Up to 4 specialist sub-agents (Max cap)" }
   ]));
 
+  const orchPolicies = sgOrchGetModelRouting().tasks?.orchestrate?.policies || {};
   pop.appendChild(buildSegGroup("Sub-Agent Model Policy", "modelPolicy", [
-    { value: "quota_saver", label: "Quota Saver (4 H)", title: "Force Sub-Agents onto 4 Hydrogen / Fast to preserve Pro & Ultra quota" },
-    { value: "adaptive", label: "Adaptive (H / Ne)", title: "Allow Planner to assign 4 Hydrogen or 4 Neon per sub-agent task" }
+    {
+      value: "quota_saver",
+      label: orchPolicies.quota_saver?.label || "Quota Saver (4 H)",
+      title: orchPolicies.quota_saver?.description || "Force Sub-Agents onto 4 Hydrogen / Fast to preserve Pro & Ultra quota"
+    },
+    {
+      value: "adaptive",
+      label: orchPolicies.adaptive?.label || "Adaptive (H / Ne)",
+      title: orchPolicies.adaptive?.description || "Allow Planner to assign 4 Hydrogen or 4 Neon per sub-agent task"
+    }
   ]));
 
   pop.appendChild(buildSegGroup("Phase 1 → 2 Plan Review", "reviewPlan", [
@@ -1621,11 +1760,15 @@ function sgRenderOrchestratorLiveCard() {
         const modelSel = document.createElement("select");
         modelSel.className = "sg-orch-review-select";
         modelSel.setAttribute("aria-label", `Model for sub-agent #${idx + 1}`);
-        const modelChoices = [
-          { value: "hydrogen", label: "4 Hydrogen", unlocked: true },
-          { value: "neon", label: "4 Neon", unlocked: sgOrchIsModelUnlocked("neon") },
-          { value: "carbon", label: "4 Carbon", unlocked: sgOrchIsModelUnlocked("carbon") }
-        ];
+        const routingCfg = sgOrchGetModelRouting();
+        const allowedReviewModels = Array.isArray(routingCfg.tasks?.orchestrate?.policies?.adaptive?.allowedModels)
+          ? routingCfg.tasks.orchestrate.policies.adaptive.allowedModels
+          : ["hydrogen", "neon", "carbon"];
+        const modelChoices = allowedReviewModels.map(mId => ({
+          value: mId,
+          label: routingCfg.models?.[mId]?.badgeLabel || `4 ${mId.charAt(0).toUpperCase() + mId.slice(1)}`,
+          unlocked: sgOrchIsModelUnlocked(mId)
+        }));
         for (const mc of modelChoices) {
           const opt = document.createElement("option");
           opt.value = mc.value;
@@ -1642,16 +1785,15 @@ function sgRenderOrchestratorLiveCard() {
         const thinkSel = document.createElement("select");
         thinkSel.className = "sg-orch-review-select";
         thinkSel.setAttribute("aria-label", `Thinking level for sub-agent #${idx + 1}`);
-        for (const tl of [
-          { value: "low", label: "Think: Low" },
-          { value: "medium", label: "Think: Medium" },
-          { value: "high", label: "Think: High" },
-          { value: "extra", label: "Think: Extra" }
-        ]) {
+        const allowedReviewThinks = Array.isArray(routingCfg.tasks?.orchestrate?.policies?.adaptive?.allowedThinkingLevels)
+          ? routingCfg.tasks.orchestrate.policies.adaptive.allowedThinkingLevels
+          : ["low", "medium", "high", "extra"];
+        for (const tId of allowedReviewThinks) {
+          const tLabel = routingCfg.thinkingLevels?.[tId]?.label || (tId.charAt(0).toUpperCase() + tId.slice(1));
           const opt = document.createElement("option");
-          opt.value = tl.value;
-          opt.textContent = tl.label;
-          if (String(ag.thinkingLevel || "low").toLowerCase() === tl.value) opt.selected = true;
+          opt.value = tId;
+          opt.textContent = `Think: ${tLabel}`;
+          if (String(ag.thinkingLevel || "low").toLowerCase() === tId) opt.selected = true;
           thinkSel.appendChild(opt);
         }
         thinkSel.addEventListener("change", () => {
@@ -2038,6 +2180,9 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
     if (cfg.mode === "clean_1turn") {
       const convCtx = typeof getConversationContext === "function" ? getConversationContext() : null;
       const plannerPrompt = sgBuildOrchestratorPlannerPrompt(cleanPrompt, cfg, skillsList, convCtx, readiness);
+      const plannerCfg = sgOrchGetModelRouting().tasks?.orchestrate?.planner?.clean1Turn || {};
+      const plannerPrimary = plannerCfg.model || "neon";
+      const plannerFallback = plannerCfg.fallbackModel || "hydrogen";
       const planResp = await sgOrchSendMessageWithKeepalive({
         type: "ORCHESTRATOR_RUN_SUBAGENTS",
         runId,
@@ -2046,8 +2191,8 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
         tasks: [{
           id: "__planner__",
           role: "Lead Orchestrator Planner",
-          model: sgOrchIsModelUnlocked("neon") ? "neon" : "hydrogen",
-          thinkingLevel: "medium",
+          model: sgOrchIsModelUnlocked(plannerPrimary) ? plannerPrimary : plannerFallback,
+          thinkingLevel: plannerCfg.thinkingLevel || "medium",
           prompt: plannerPrompt
         }]
       }, { allowRetry: true });
@@ -2354,6 +2499,7 @@ function initOrchestratorSystem() {
   if (typeof SG_IS_SILENT_BG_WORKER_TAB !== "undefined" && SG_IS_SILENT_BG_WORKER_TAB) return;
   if (_sgOrchestratorInitialized) return;
   _sgOrchestratorInitialized = true;
+  sgOrchHydrateModelRoutingConfig();
 
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
     const reader = typeof sgSyncGetCached === "function"

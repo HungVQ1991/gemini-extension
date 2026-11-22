@@ -1,3 +1,8 @@
+if ("function" == typeof importScripts) {
+  try {
+    importScripts("lib/model-routing.js", "lib/model-extractor.js");
+  } catch (_e) {}
+}
 const extensionVersion = chrome.runtime.getManifest().version;
 const GPS_STORAGE_MIGRATED_KEY = "gpsStorageMigratedV1";
 let _gpsStorageMigrationPromise = null;
@@ -836,6 +841,32 @@ chrome.permissions.onRemoved.addListener(e => {
     });
     return true;
   }
+  if ("GET_MODEL_ROUTING_CONFIG" === e.type) {
+    sgGetModelRoutingConfig(Boolean(e && e.reload)).then(n).catch(err => {
+      n && n({
+        ok: false,
+        source: "default",
+        config: globalThis.SGModelRouting ? globalThis.SGModelRouting.cloneDefaultConfig() : null,
+        errors: [String(err && err.message || err)],
+        warnings: []
+      });
+    });
+    return true;
+  }
+  if ("EXTRACT_AVAILABLE_MODELS" === e.type) {
+    handleExtractAvailableModels(e, t).then(n).catch(err => {
+      n && n({
+        ok: false,
+        feasibleModelNames: [],
+        feasibleModels: [],
+        excludedModels: [],
+        allModels: [],
+        thinkingLevels: [],
+        error: String(err && err.message || err)
+      });
+    });
+    return true;
+  }
   if ("OPEN_SAVED_INFO_TAB" === e.type) {
     const url = e && typeof e.url === "string" ? e.url : "";
     if (/^https:\/\/gemini\.google\.com\/(?:u\/\d+\/)?saved-info\/?$/.test(url)) {
@@ -1000,6 +1031,85 @@ async function handleGetBundledBaseline() {
     ok: true,
     bundleVersion,
     instructions
+  };
+}
+
+async function sgGetModelRoutingConfig(forceReload = false) {
+  if (globalThis.SGModelRouting && typeof globalThis.SGModelRouting.loadConfigFromExtension === "function") {
+    return globalThis.SGModelRouting.loadConfigFromExtension({ forceReload: Boolean(forceReload) });
+  }
+  try {
+    const resp = await fetch(chrome.runtime.getURL("config/model-routing.json"));
+    if (resp && resp.ok) {
+      const config = await resp.json();
+      return { ok: true, source: "json", config, errors: [], warnings: [] };
+    }
+  } catch (_e) {}
+  return { ok: false, source: "default", config: null, errors: ["SGModelRouting unavailable"], warnings: [] };
+}
+
+async function handleExtractAvailableModels(e, t) {
+  let targetTabId = Number.isInteger(e && e.tabId) ? e.tabId : null;
+  if (!targetTabId && t && t.tab && t.tab.id && isAllowedGeminiTabUrl(t.tab.url)) {
+    targetTabId = t.tab.id;
+  }
+  if (!targetTabId) {
+    const tabs = await chrome.tabs.query({ url: "*://gemini.google.com/*" });
+    const activeTab = (tabs || []).find(tb => tb.active) || (tabs || [])[0];
+    targetTabId = activeTab ? activeTab.id : null;
+  }
+  if (!targetTabId) {
+    return {
+      ok: false,
+      feasibleModelNames: [],
+      feasibleModels: [],
+      excludedModels: [],
+      allModels: [],
+      thinkingLevels: [],
+      error: "No open Gemini tab found to extract models from"
+    };
+  }
+
+  const routingRes = await sgGetModelRoutingConfig(Boolean(e && e.reload));
+  const extMod = globalThis.SGModelExtractor;
+  if (!extMod || typeof extMod.sgExtractFeasibleModelsInTab !== "function") {
+    return {
+      ok: false,
+      feasibleModelNames: [],
+      feasibleModels: [],
+      excludedModels: [],
+      allModels: [],
+      thinkingLevels: [],
+      error: "SGModelExtractor module is not loaded"
+    };
+  }
+
+  const extractorArgs = extMod.buildExtractorArgs(routingRes.config);
+  const execRes = await chrome.scripting.executeScript({
+    target: { tabId: targetTabId },
+    func: extMod.sgExtractFeasibleModelsInTab,
+    args: [extractorArgs]
+  });
+  const extracted = execRes && execRes[0] && execRes[0].result
+    ? execRes[0].result
+    : {
+        ok: false,
+        feasibleModelNames: [],
+        feasibleCanonicalIds: [],
+        feasibleModels: [],
+        excludedModels: [],
+        allModels: [],
+        thinkingLevels: [],
+        error: "Extractor returned empty result"
+      };
+  const feasibility = typeof extMod.evaluateConfigFeasibility === "function"
+    ? extMod.evaluateConfigFeasibility(routingRes.config, extracted, globalThis.SGModelRouting)
+    : null;
+
+  return {
+    ...extracted,
+    configSource: routingRes.source,
+    feasibility
   };
 }
 async function tryFetchChatViaRpc(e, t) {
@@ -1389,11 +1499,20 @@ async function handleOptimizePrompt(e, t) {
     isChainStep: s
   } = e;
   let l = null;
-  const d = await chrome.storage.sync.get(["optimizeModel", "optimizeUseThinking", "customOptimizePrompt", "customFollowupPrompt"]),
-    u = d.optimizeModel || "flash",
-    m = !0 === d.optimizeUseThinking,
+  const d = await chrome.storage.sync.get(["optimizeModel", "customOptimizePrompt", "customFollowupPrompt"]),
     h = d.customOptimizePrompt || null,
     f = d.customFollowupPrompt || null;
+  const routingRes = await sgGetModelRoutingConfig();
+  const routingApi = globalThis.SGModelRouting;
+  const optProfile = routingApi && typeof routingApi.resolveOptimizeProfile === "function"
+    ? routingApi.resolveOptimizeProfile(d.optimizeModel, routingRes.config)
+    : {
+        level: d.optimizeModel || "lite",
+        model: "pro" === d.optimizeModel ? "neon" : "hydrogen",
+        thinkingLevel: "thinking" === d.optimizeModel || "flash" === d.optimizeModel ? "high" : "low",
+        timeoutMs: "lite" === (d.optimizeModel || "lite") ? 6e4 : 12e4,
+        selectionPayload: null
+      };
   try {
     const c = t?.tab?.id;
     if (!c) throw new Error("No source tab ID provided for optimization");
@@ -1421,7 +1540,7 @@ async function handleOptimizePrompt(e, t) {
       func: spoofFocus,
       world: "MAIN"
     });
-    let r, d = null;
+    let r, curMode = null;
     {
       const e = Date.now(),
         t = 5e3;
@@ -1465,57 +1584,9 @@ async function handleOptimizePrompt(e, t) {
           },
           func: getCurrentModeName
         });
-        d = e && e[0] ? e[0].result : null
+        curMode = e && e[0] ? e[0].result : null
       } catch (e) {}
-      await _addModeHideClassInTab(l);
-      const o = Date.now(),
-        a = 5e3;
-      for (; Date.now() - o < a;) {
-        try {
-          const e = await chrome.scripting.executeScript({
-              target: {
-                tabId: l
-              },
-              func: clickOptimizationModeButton,
-              args: [u]
-            }),
-            t = e && e[0] ? e[0].result : null;
-          if ("CLICKED" === t) {
-            await sleep(200);
-            break
-          }
-          if ("ALREADY_SELECTED" === t) break;
-          if ("MENU_OPENED" === t) {
-            await sleep(150);
-            continue
-          }
-        } catch (e) {}
-        await sleep(150)
-      }
-      if (await _removeModeHideClassInTab(l), m) {
-        await _addModeHideClassInTab(l);
-        const e = Date.now(),
-          t = 5e3;
-        for (; Date.now() - e < t;) {
-          try {
-            const e = await chrome.scripting.executeScript({
-                target: {
-                  tabId: l
-                },
-                func: setThinkingLevelInTab,
-                args: ["extended"]
-              }),
-              t = e && e[0] ? e[0].result : null;
-            if ("CLICKED" === t || "ALREADY_SELECTED" === t) break;
-            if ("MENU_OPENED" === t) {
-              await sleep(150);
-              continue
-            }
-          } catch (e) {}
-          await sleep(150)
-        }
-        await _removeModeHideClassInTab(l)
-      }
+      await sgApplyModelProfileInTab(l, optProfile, { config: routingRes.config });
     }
     if (s && o && a && a.previousSteps) {
       let e = a.previousSteps.map(e => `[Step ${e.stepNumber}]\n${e.prompt}`).join("\n\n");
@@ -1556,7 +1627,7 @@ async function handleOptimizePrompt(e, t) {
       },
       func: clickSubmit
     });
-    const b = "thinking" === u || "pro" === u ? 12e4 : 6e4;
+    const b = optProfile.timeoutMs || 6e4;
     let y = await pollForResponse(l, b);
     if (y) y = cleanOptimizedPrompt(y);
     try {
@@ -1653,6 +1724,12 @@ async function handleFixGrammar(e, t) {
       } catch (e) {}
       await sleep(200);
     }
+    const routingRes = await sgGetModelRoutingConfig();
+    const routingApi = globalThis.SGModelRouting;
+    const grammarProfile = routingApi && typeof routingApi.resolveGrammarProfile === "function"
+      ? routingApi.resolveGrammarProfile(routingRes.config)
+      : { model: "hydrogen", thinkingLevel: "low", timeoutMs: 6e4, selectionPayload: null };
+    await sgApplyModelProfileInTab(o, grammarProfile, { config: routingRes.config });
     const m = sgWrapPromptFence(GRAMMAR_SYSTEM_PROMPT, n);
     const p = Date.now(), h = 15e3;
     let f = !1;
@@ -1676,7 +1753,7 @@ async function handleFixGrammar(e, t) {
       target: { tabId: o },
       func: clickSubmit
     });
-    let g = await pollForResponse(o, 6e4);
+    let g = await pollForResponse(o, grammarProfile.timeoutMs || 6e4);
     if (g) g = cleanOptimizedPrompt(g);
     try {
       await chrome.tabs.remove(o);
@@ -3083,23 +3160,45 @@ async function sgAcquireOrchWarmWorker(pool, slot) {
   return workerEntry.bootPromise;
 }
 
-function sgSelectOrchModelStepInTab(modelSpec, thinkingSpec) {
+function sgSelectOrchModelStepInTab(modelSpec, thinkingSpec, routingPayload) {
   if (document.body) {
     document.body.dataset.sgBgWorker = "true";
     document.body.classList.remove("sg-periodic-send-blocked");
   }
-  const reqModel = String(modelSpec || "hydrogen").toLowerCase().trim();
-  const reqThink = String(thinkingSpec || "low").toLowerCase().trim();
-  const isDefaultLowThink = "low" === reqThink || "standard" === reqThink || "minimal" === reqThink;
+  const payload = routingPayload && typeof routingPayload === "object" ? routingPayload : null;
+  const reqModel = String((payload && payload.model) || modelSpec || "hydrogen").toLowerCase().trim();
+  const reqThink = String((payload && payload.thinkingLevel) || thinkingSpec || "low").toLowerCase().trim();
+  const enforceThink = payload ? payload.enforceThinkingLevel !== !1 : !1;
+  const isDefaultLowThink = !enforceThink && ("low" === reqThink || "standard" === reqThink || "minimal" === reqThink);
   const modeBtn = document.querySelector('[data-test-id="bard-mode-menu-button"]');
   if (!modeBtn) return { state: "NO_MODE_BTN", actualModel: reqModel };
+
+  const lockedSubstrings = payload && Array.isArray(payload.lockedTestIdSubstrings) && payload.lockedTestIdSubstrings.length > 0
+    ? payload.lockedTestIdSubstrings
+    : ["upsell"];
+  const autoPatterns = payload && Array.isArray(payload.autoPatterns) && payload.autoPatterns.length > 0
+    ? payload.autoPatterns
+    : ["tự động", "automatic", "auto"];
+
+  const matchesToken = (txt, pat) => {
+    const p = String(pat || "").toLowerCase().trim();
+    if (!p || !txt) return !1;
+    if ("pro" === p) return /\bpro\b/.test(txt);
+    if ("flash" === p) return /\bflash\b(?!\s*-?\s*lite)/.test(txt);
+    if ("auto" === p) return /\bauto\b/.test(txt);
+    return txt.includes(p);
+  };
+
+  const isAutoText = txt => autoPatterns.some(pat => matchesToken(txt, pat));
 
   const isLockedItem = item => {
     if (!item) return !0;
     const tid = (item.getAttribute("data-test-id") || "").toLowerCase();
-    if (tid.includes("upsell")) return !0;
+    if (lockedSubstrings.some(sub => tid.includes(sub))) return !0;
     if ("true" === item.getAttribute("aria-disabled") || item.hasAttribute("disabled")) return !0;
-    if (item.querySelector('mat-icon[fonticon="lock"], mat-icon[data-mat-icon-name="lock"], .lock-icon')) return !0;
+    if (item.querySelector('mat-icon[fonticon="lock"], mat-icon[data-mat-icon-name="lock"], mat-icon[fonticon="lock_outline"], .lock-icon')) return !0;
+    const icons = item.querySelectorAll ? Array.from(item.querySelectorAll("mat-icon")) : [];
+    if (icons.some(ic => /^(lock|lock_outline)$/i.test((ic.textContent || "").trim()))) return !0;
     return !1;
   };
 
@@ -3113,12 +3212,34 @@ function sgSelectOrchModelStepInTab(modelSpec, thinkingSpec) {
     argon: ["argon", "deep think"],
     auto: ["tự động", "auto", "automatic"]
   };
-  const patterns = MODEL_MATCHERS[reqModel] || MODEL_MATCHERS.hydrogen;
+  const patterns = payload && Array.isArray(payload.modelPatterns) && payload.modelPatterns.length > 0
+    ? payload.modelPatterns
+    : (MODEL_MATCHERS[reqModel] || MODEL_MATCHERS.hydrogen);
+
+  const fallbackModelSpecs = payload && Array.isArray(payload.fallbackModels) && payload.fallbackModels.length > 0
+    ? payload.fallbackModels
+    : [{ id: "hydrogen", domPatterns: MODEL_MATCHERS.hydrogen }];
+
+  const THINK_MATCHERS = {
+    minimal: ["minimal", "tối thiểu", "low", "thấp", "standard", "tiêu chuẩn"],
+    low: ["low", "thấp", "standard", "tiêu chuẩn"],
+    standard: ["standard", "tiêu chuẩn", "low", "thấp"],
+    medium: ["medium", "trung bình", "vừa", "balanced"],
+    high: ["high", "cao", "extended", "mở rộng"],
+    extended: ["extended", "mở rộng", "high", "cao"],
+    extra: ["extra", "rất cao", "max", "siêu", "tối đa", "high", "cao"]
+  };
+  const thinkPatterns = payload && Array.isArray(payload.thinkingPatterns) && payload.thinkingPatterns.length > 0
+    ? payload.thinkingPatterns
+    : (THINK_MATCHERS[reqThink] || THINK_MATCHERS.low);
+  const allThinkTokens = payload && Array.isArray(payload.allThinkingTokens) && payload.allThinkingTokens.length > 0
+    ? payload.allThinkingTokens
+    : ["low", "medium", "high", "extra", "minimal", "max", "standard", "extended", "thấp", "trung bình", "vừa", "cao", "rất cao", "tối thiểu", "tối đa", "mở rộng", "tiêu chuẩn"];
 
   const options = Array.from(document.querySelectorAll('[data-test-id^="bard-mode-option-"]'));
   if (0 === options.length) {
     const btnText = (modeBtn.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
-    if (isDefaultLowThink && patterns.some(p => btnText.includes(p))) {
+    if (isDefaultLowThink && !isAutoText(btnText) && patterns.some(p => matchesToken(btnText, p))) {
       return { state: "READY", actualModel: reqModel };
     }
     const trigger = modeBtn.querySelector("button.input-area-switch") || modeBtn.querySelector("button") || modeBtn;
@@ -3128,35 +3249,45 @@ function sgSelectOrchModelStepInTab(modelSpec, thinkingSpec) {
 
   let targetOpt = null;
   let actualModel = reqModel;
-  for (const opt of options) {
-    const txt = (opt.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
-    if (patterns.some(p => txt.includes(p))) {
-      if (!isLockedItem(opt)) {
-        targetOpt = opt;
-      }
-      break;
-    }
-  }
-
-  if (!targetOpt) {
-    const fallbackPatterns = MODEL_MATCHERS.hydrogen;
+  for (const pat of patterns) {
     for (const opt of options) {
       if (isLockedItem(opt)) continue;
       const txt = (opt.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
-      if (fallbackPatterns.some(p => txt.includes(p))) {
+      if (isAutoText(txt)) continue;
+      if (matchesToken(txt, pat)) {
         targetOpt = opt;
-        actualModel = "hydrogen";
         break;
       }
     }
+    if (targetOpt) break;
+  }
+
+  if (!targetOpt) {
+    for (const fb of fallbackModelSpecs) {
+      const fbPats = Array.isArray(fb.domPatterns) ? fb.domPatterns : [];
+      for (const pat of fbPats) {
+        for (const opt of options) {
+          if (isLockedItem(opt)) continue;
+          const txt = (opt.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+          if (isAutoText(txt)) continue;
+          if (matchesToken(txt, pat)) {
+            targetOpt = opt;
+            actualModel = fb.id || "hydrogen";
+            break;
+          }
+        }
+        if (targetOpt) break;
+      }
+      if (targetOpt) break;
+    }
     if (!targetOpt) {
-      targetOpt = options.find(o => !isLockedItem(o)) || null;
+      targetOpt = options.find(o => !isLockedItem(o) && !isAutoText((o.textContent || "").toLowerCase().replace(/\s+/g, " ").trim())) || null;
       if (targetOpt) actualModel = "hydrogen";
     }
   }
 
   if (targetOpt) {
-    const isChecked = "true" === targetOpt.getAttribute("aria-checked") || targetOpt.classList.contains("active") || targetOpt.classList.contains("selected") || !!targetOpt.querySelector(".active, .selected");
+    const isChecked = "true" === targetOpt.getAttribute("aria-checked") || targetOpt.classList.contains("active") || targetOpt.classList.contains("selected") || targetOpt.classList.contains("is-selected") || !!targetOpt.querySelector(".active, .selected, .is-selected");
     if (!isChecked) {
       targetOpt.click();
       return { state: isDefaultLowThink ? "MODEL_SETTLING" : "MODEL_CLICKED", actualModel };
@@ -3168,65 +3299,73 @@ function sgSelectOrchModelStepInTab(modelSpec, thinkingSpec) {
     return { state: "READY", actualModel };
   }
 
-  // Also check thinking level items if non-default thinking level requested
   const allMenuItems = Array.from(document.querySelectorAll("gem-menu-item"));
-  const levelItems = allMenuItems.filter(item => {
-    if (item.hasAttribute("data-test-id")) return !1;
-    if ("true" === item.getAttribute("aria-haspopup") || "thinking_level" === item.getAttribute("value")) return !1;
-    const t = (item.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
-    return /\b(low|medium|high|extra|minimal|max|standard|extended|thấp|trung bình|cao|mở rộng|tiêu chuẩn)\b/i.test(t);
-  });
-
-  const THINK_MATCHERS = {
-    minimal: ["minimal", "tối thiểu", "low", "thấp", "standard"],
-    low: ["low", "thấp", "standard", "tiêu chuẩn"],
-    standard: ["standard", "tiêu chuẩn", "low", "thấp"],
-    medium: ["medium", "trung bình", "vừa"],
-    high: ["high", "cao", "extended", "mở rộng"],
-    extended: ["extended", "mở rộng", "high", "cao"],
-    extra: ["extra", "max", "siêu", "tối đa", "high", "cao"]
-  };
-  const thinkPatterns = THINK_MATCHERS[reqThink] || THINK_MATCHERS.low;
+  const submenuTrigger = document.querySelector('gem-menu-item[value="thinking_level"]') || allMenuItems.find(item => "true" === item.getAttribute("aria-haspopup"));
+  const ctrlId = submenuTrigger && submenuTrigger.getAttribute ? submenuTrigger.getAttribute("aria-controls") : null;
+  const ctrlContainer = ctrlId && typeof document.getElementById === "function" ? document.getElementById(ctrlId) : null;
+  let levelItems = ctrlContainer ? Array.from(ctrlContainer.querySelectorAll("gem-menu-item")) : [];
+  if (levelItems.length < 2) {
+    levelItems = allMenuItems.filter(item => {
+      if (item.hasAttribute("data-test-id")) return !1;
+      if ("true" === item.getAttribute("aria-haspopup") || "thinking_level" === item.getAttribute("value")) return !1;
+      const t = (item.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+      return allThinkTokens.some(tok => matchesToken(t, tok));
+    });
+  }
 
   if (levelItems.length >= 2) {
-    const matchedLevel = levelItems.find(item => {
-      const t = (item.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
-      return thinkPatterns.some(p => t.includes(p));
-    }) || levelItems[0];
+    let matchedLevel = null;
+    for (const pat of thinkPatterns) {
+      matchedLevel = levelItems.find(item => {
+        if (item.disabled || "true" === item.getAttribute("aria-disabled")) return !1;
+        const t = (item.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+        return matchesToken(t, pat);
+      });
+      if (matchedLevel) break;
+    }
+    if (!matchedLevel) matchedLevel = levelItems[0];
     if (matchedLevel) {
-      const isSelected = "true" === matchedLevel.getAttribute("aria-checked") || matchedLevel.classList.contains("selected") || matchedLevel.classList.contains("active") || !!matchedLevel.querySelector(".active, .selected");
+      const isSelected = "true" === matchedLevel.getAttribute("aria-checked") || matchedLevel.classList.contains("selected") || matchedLevel.classList.contains("is-selected") || matchedLevel.classList.contains("active") || !!matchedLevel.querySelector(".active, .selected, .is-selected");
       if (!isSelected) matchedLevel.click();
     }
+    if (submenuTrigger && submenuTrigger.dataset) delete submenuTrigger.dataset.sgOrchOpened;
     document.body.click();
     return { state: "READY", actualModel };
   }
 
-  const submenuTrigger = document.querySelector('gem-menu-item[value="thinking_level"]') || allMenuItems.find(item => "true" === item.getAttribute("aria-haspopup"));
-  if (submenuTrigger && !submenuTrigger.dataset.sgOrchOpened) {
+  if (submenuTrigger && submenuTrigger.dataset && !submenuTrigger.dataset.sgOrchOpened) {
     submenuTrigger.dataset.sgOrchOpened = "1";
-    submenuTrigger.dispatchEvent(new MouseEvent("mouseenter", { bubbles: !0 }));
-    submenuTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: !0 }));
+    if ("function" == typeof MouseEvent) {
+      submenuTrigger.dispatchEvent(new MouseEvent("mouseenter", { bubbles: !0 }));
+      submenuTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: !0 }));
+    }
     submenuTrigger.click();
     return { state: "SUBMENU_OPENED", actualModel };
   }
 
-  if (submenuTrigger) delete submenuTrigger.dataset.sgOrchOpened;
+  if (submenuTrigger && submenuTrigger.dataset) delete submenuTrigger.dataset.sgOrchOpened;
   document.body.click();
   return { state: "READY", actualModel };
 }
 
-async function sgConfigureOrchWorkerModel(pool, tabId, modelSpec, thinkingSpec) {
-  let actualModel = String(modelSpec || "hydrogen").toLowerCase();
+async function sgApplyModelProfileInTab(tabId, profile, { abortedCheck, config } = {}) {
+  const routingApi = globalThis.SGModelRouting;
+  const reqModel = String(profile?.model || "hydrogen").toLowerCase();
+  const reqThink = String(profile?.thinkingLevel || "low").toLowerCase();
+  const payload = profile?.selectionPayload || (routingApi && typeof routingApi.buildSelectionPayload === "function"
+    ? routingApi.buildSelectionPayload(reqModel, reqThink, config)
+    : null);
+  let actualModel = reqModel;
   let switchedModel = !1;
   await _addModeHideClassInTab(tabId);
   try {
     const start = Date.now();
-    for (; Date.now() - start < 3500 && !pool.aborted;) {
+    for (; Date.now() - start < 4e3 && !("function" == typeof abortedCheck && abortedCheck());) {
       try {
         const res = await chrome.scripting.executeScript({
           target: { tabId },
           func: sgSelectOrchModelStepInTab,
-          args: [modelSpec || "hydrogen", thinkingSpec || "low"]
+          args: [reqModel, reqThink, payload]
         });
         const info = res && res[0] ? res[0].result : null;
         if (info && info.actualModel) actualModel = info.actualModel;
@@ -3235,7 +3374,11 @@ async function sgConfigureOrchWorkerModel(pool, tabId, modelSpec, thinkingSpec) 
           await sleep(240);
           break;
         }
-        if (info && "MODEL_CLICKED" === info.state) switchedModel = !0;
+        if (info && "MODEL_CLICKED" === info.state) {
+          switchedModel = !0;
+          await sleep(220);
+          continue;
+        }
         if (!info || "READY" === info.state || "NO_MODE_BTN" === info.state) break;
       } catch (e) {
         break;
@@ -3256,6 +3399,24 @@ async function sgConfigureOrchWorkerModel(pool, tabId, modelSpec, thinkingSpec) 
     await _removeModeHideClassInTab(tabId, switchedModel ? 240 : 120);
   }
   return actualModel;
+}
+
+async function sgConfigureOrchWorkerModel(pool, tabId, modelSpec, thinkingSpec) {
+  const routingRes = await sgGetModelRoutingConfig().catch(() => ({ config: null }));
+  const routingApi = globalThis.SGModelRouting;
+  const reqModel = String(modelSpec || "hydrogen").toLowerCase();
+  const reqThink = String(thinkingSpec || "low").toLowerCase();
+  const selectionPayload = routingApi && typeof routingApi.buildSelectionPayload === "function"
+    ? routingApi.buildSelectionPayload(reqModel, reqThink, routingRes?.config)
+    : null;
+  return sgApplyModelProfileInTab(tabId, {
+    model: selectionPayload ? selectionPayload.model : reqModel,
+    thinkingLevel: selectionPayload ? selectionPayload.thinkingLevel : reqThink,
+    selectionPayload
+  }, {
+    abortedCheck: () => Boolean(pool && pool.aborted),
+    config: routingRes?.config
+  });
 }
 
 function sgEnterOrchPromptInTab(text) {
@@ -3849,8 +4010,15 @@ async function sgRunTaskOnOrchWorker(pool, worker, task) {
     chars: 0
   });
 
-  const isHeavy = "neon" === actualModel || "carbon" === actualModel || "pro" === actualModel || "thinking" === actualModel;
-  const timeoutMs = isHeavy ? 15e4 : 9e4;
+  const routingRes = await sgGetModelRoutingConfig().catch(() => null);
+  const cfgModels = routingRes && routingRes.config && routingRes.config.models;
+  const cfgAdPolicy = routingRes && routingRes.config && routingRes.config.tasks?.orchestrate?.policies?.adaptive;
+  const isHeavy = cfgModels && cfgModels[actualModel]
+    ? Boolean(cfgModels[actualModel].heavy)
+    : ("neon" === actualModel || "carbon" === actualModel || "pro" === actualModel || "thinking" === actualModel);
+  const timeoutMs = isHeavy
+    ? (cfgAdPolicy?.heavyTimeoutMs || 15e4)
+    : (cfgAdPolicy?.standardTimeoutMs || 9e4);
   const output = await sgPollOrchWorkerResponse(pool, tabId, baselineCount, baselineUserQueries, timeoutMs, prog => {
     sgNotifyOrchProgress(pool.srcTabId, {
       runId: pool.runId,

@@ -911,6 +911,32 @@ input:focus-visible+.slider {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
 
+.sg-seg-stacked .sg-seg-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 6px;
+}
+
+.sg-seg-opt-model {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.sg-seg-opt-level {
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text-hint);
+}
+
+.sg-seg-opt.sg-active .sg-seg-opt-level {
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .shortcuts-row {
   display: flex;
   justify-content: flex-start;

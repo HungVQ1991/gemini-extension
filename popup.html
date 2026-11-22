@@ -307,10 +307,10 @@
                     <span id="optimize-model-label"
                         style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500; color: var(--text-label);">Optimization Model</span>
                     <p style="font-size: 12px; color: var(--text-hint); margin-bottom: 10px;">Choose which model to use when optimizing prompts.</p>
-                    <div class="sg-seg" id="optimize-model-seg" role="radiogroup" aria-labelledby="optimize-model-label">
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash">Flash-Lite</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="thinking">Flash</button>
-                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro">Pro</button>
+                    <div class="sg-seg sg-seg-stacked" id="optimize-model-seg" role="radiogroup" aria-labelledby="optimize-model-label">
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="lite" title="Lite — 4 Hydrogen · Low" aria-label="Hydrogen · Low (Lite)"><span class="sg-seg-opt-model">Hydrogen</span><span class="sg-seg-opt-level">Low</span></button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="flash" title="Flash — 4 Hydrogen · High" aria-label="Hydrogen · High (Flash)"><span class="sg-seg-opt-model">Hydrogen</span><span class="sg-seg-opt-level">High</span></button>
+                        <button type="button" class="sg-seg-opt" role="radio" data-value="pro" title="Pro — 4 Neon · Low" aria-label="Neon · Low (Pro)"><span class="sg-seg-opt-model">Neon</span><span class="sg-seg-opt-level">Low</span></button>
                     </div>
                 </div>
             </div>
@@ -372,6 +372,7 @@
         </div>
     </div>
 
+    <script src="lib/model-routing.js"></script>
     <script src="popup.js"></script>
 </body>
 

@@ -2413,7 +2413,7 @@ const SG_SETTINGS_CHANGED_KEY = "sgSettingsChanged",
   SG_SETTINGS_DEFAULT_CHOICES = {
     defaultModel: "none",
     defaultReasoningEffort: "none",
-    optimizeModel: "flash",
+    optimizeModel: "lite",
     tempChatModel: "none"
   },
   SG_SETTINGS_DEFAULT_SHORTCUTS = {

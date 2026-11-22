@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "defaultFallbackModel": "hydrogen",
+  "defaultThinkingLevel": "low",
+  "models": {
+    "hydrogen": {
+      "id": "hydrogen",
+      "symbol": "H",
+      "displayName": "Hydrogen",
+      "badgeLabel": "4 Hydrogen",
+      "legacyMode": "fast",
+      "heavy": false,
+      "aliases": [
+        "h",
+        "4 hydrogen",
+        "gemini 4 hydrogen",
+        "flash-lite",
+        "flash lite",
+        "fast",
+        "gemini fast"
+      ],
+      "domPatterns": [
+        "hydrogen",
+        "trợ giúp hằng ngày",
+        "everyday help",
+        "everyday",
+        "daily",
+        "flash-lite",
+        "flash lite",
+        "gemini fast",
+        "fast"
+      ],
+      "fallbackOrder": [
+        "neon",
+        "carbon"
+      ],
+      "thinkingLevels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "neon": {
+      "id": "neon",
+      "symbol": "Ne",
+      "displayName": "Neon",
+      "badgeLabel": "4 Neon",
+      "legacyMode": "thinking",
+      "heavy": true,
+      "aliases": [
+        "ne",
+        "4 neon",
+        "gemini 4 neon",
+        "thinking",
+        "gemini thinking"
+      ],
+      "domPatterns": [
+        "neon",
+        "phân tích sâu hơn",
+        "deeper analysis",
+        "deep analysis",
+        "gemini thinking",
+        "thinking"
+      ],
+      "fallbackOrder": [
+        "hydrogen",
+        "carbon"
+      ],
+      "thinkingLevels": [
+        "low",
+        "medium",
+        "high",
+        "extra"
+      ]
+    },
+    "carbon": {
+      "id": "carbon",
+      "symbol": "C",
+      "displayName": "Carbon",
+      "badgeLabel": "4 Carbon",
+      "legacyMode": "pro",
+      "heavy": true,
+      "aliases": [
+        "c",
+        "4 carbon",
+        "gemini 4 carbon",
+        "pro",
+        "gemini pro",
+        "3.1 pro"
+      ],
+      "domPatterns": [
+        "carbon",
+        "lập trình và xử lý công việc phức tạp",
+        "coding and complex",
+        "most complex work",
+        "complex work",
+        "gemini pro",
+        "pro"
+      ],
+      "fallbackOrder": [
+        "neon",
+        "hydrogen"
+      ],
+      "thinkingLevels": [
+        "low",
+        "medium",
+        "high",
+        "extra"
+      ]
+    },
+    "argon": {
+      "id": "argon",
+      "symbol": "Ar",
+      "displayName": "Argon",
+      "badgeLabel": "4 Argon",
+      "legacyMode": "thinking",
+      "heavy": true,
+      "aliases": [
+        "ar",
+        "4 argon",
+        "gemini 4 argon",
+        "deep think"
+      ],
+      "domPatterns": [
+        "argon",
+        "code and analysis",
+        "deep think"
+      ],
+      "fallbackOrder": [
+        "neon",
+        "hydrogen"
+      ],
+      "thinkingLevels": [
+        "low",
+        "medium",
+        "high",
+        "extra"
+      ]
+    }
+  },
+  "thinkingLevels": {
+    "minimal": {
+      "id": "minimal",
+      "label": "Minimal",
+      "aliases": [
+        "min",
+        "tối thiểu"
+      ],
+      "domPatterns": [
+        "minimal",
+        "tối thiểu"
+      ]
+    },
+    "low": {
+      "id": "low",
+      "label": "Low",
+      "aliases": [
+        "standard",
+        "tiêu chuẩn",
+        "thấp"
+      ],
+      "domPatterns": [
+        "low",
+        "thấp",
+        "standard",
+        "tiêu chuẩn"
+      ]
+    },
+    "medium": {
+      "id": "medium",
+      "label": "Medium",
+      "aliases": [
+        "med",
+        "balanced",
+        "trung bình",
+        "vừa"
+      ],
+      "domPatterns": [
+        "medium",
+        "trung bình",
+        "vừa",
+        "balanced"
+      ]
+    },
+    "high": {
+      "id": "high",
+      "label": "High",
+      "aliases": [
+        "extended",
+        "cao",
+        "mở rộng"
+      ],
+      "domPatterns": [
+        "high",
+        "cao",
+        "extended",
+        "mở rộng"
+      ]
+    },
+    "extra": {
+      "id": "extra",
+      "label": "Extra",
+      "aliases": [
+        "max",
+        "maximum",
+        "ultra",
+        "siêu",
+        "rất cao",
+        "tối đa"
+      ],
+      "domPatterns": [
+        "extra",
+        "rất cao",
+        "max",
+        "siêu",
+        "tối đa"
+      ]
+    }
+  },
+  "tasks": {
+    "optimize": {
+      "defaultLevel": "lite",
+      "levels": {
+        "lite": {
+          "label": "Lite",
+          "model": "hydrogen",
+          "thinkingLevel": "low",
+          "aliases": [
+            "flash-lite",
+            "flash_lite",
+            "fast"
+          ],
+          "timeoutMs": 60000
+        },
+        "flash": {
+          "label": "Flash",
+          "model": "hydrogen",
+          "thinkingLevel": "high",
+          "aliases": [
+            "thinking",
+            "standard"
+          ],
+          "timeoutMs": 120000
+        },
+        "pro": {
+          "label": "Pro",
+          "model": "neon",
+          "thinkingLevel": "low",
+          "aliases": [
+            "deep",
+            "heavy"
+          ],
+          "timeoutMs": 120000
+        }
+      }
+    },
+    "grammar": {
+      "model": "hydrogen",
+      "thinkingLevel": "low",
+      "timeoutMs": 60000
+    },
+    "orchestrate": {
+      "planner": {
+        "clean1Turn": {
+          "model": "neon",
+          "fallbackModel": "hydrogen",
+          "thinkingLevel": "medium",
+          "timeoutMs": 150000
+        }
+      },
+      "policies": {
+        "quota_saver": {
+          "label": "Quota Saver (4 H)",
+          "description": "Force Sub-Agents onto 4 Hydrogen · Low to preserve Pro & Ultra quota",
+          "model": "hydrogen",
+          "thinkingLevel": "low",
+          "timeoutMs": 90000
+        },
+        "adaptive": {
+          "label": "Adaptive (H / Ne)",
+          "description": "Allow Planner to assign models per sub-agent task based on complexity",
+          "defaultModel": "hydrogen",
+          "defaultThinkingLevel": "low",
+          "plannerPromptModels": [
+            "hydrogen",
+            "neon"
+          ],
+          "allowedModels": [
+            "hydrogen",
+            "neon",
+            "carbon"
+          ],
+          "plannerPromptThinkingLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "allowedThinkingLevels": [
+            "low",
+            "medium",
+            "high",
+            "extra"
+          ],
+          "standardTimeoutMs": 90000,
+          "heavyTimeoutMs": 150000
+        }
+      }
+    }
+  },
+  "extractor": {
+    "menuButtonSelector": "[data-test-id=\"bard-mode-menu-button\"]",
+    "optionSelector": "[data-test-id^=\"bard-mode-option-\"]",
+    "thinkingTriggerSelector": "gem-menu-item[value=\"thinking_level\"]",
+    "autoPatterns": [
+      "tự động",
+      "automatic",
+      "auto"
+    ],
+    "lockedTestIdSubstrings": [
+      "upsell"
+    ],
+    "ignoreTitlePatterns": [
+      "upgrade",
+      "nâng cấp"
+    ]
+  }
+}

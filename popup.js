@@ -116,7 +116,7 @@ function setupToggle({ id, storageKey, defaultOn, enableMsg, disableMsg, onChang
 }
 
 // Segmented control helper with keyboard arrow navigation
-function wireSegmented(containerId, storageKey, defaultVal, initialData = null) {
+function wireSegmented(containerId, storageKey, defaultVal, initialData = null, normalizeVal = null) {
   const container = document.getElementById(containerId);
   if (!container) return null;
   const options = Array.from(container.querySelectorAll(".sg-seg-opt"));
@@ -133,7 +133,8 @@ function wireSegmented(containerId, storageKey, defaultVal, initialData = null) 
 
   const hydrate = res => {
     const safe = res || {};
-    const current = safe[storageKey] || defaultVal;
+    const raw = safe[storageKey] || defaultVal;
+    const current = typeof normalizeVal === "function" ? normalizeVal(raw) : raw;
     setActive(current);
   };
 
@@ -411,7 +412,64 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const hydrateOptimizeSeg = wireSegmented("optimize-model-seg", "optimizeModel", "flash");
+  let activeModelRoutingCfg = window.SGModelRouting ? window.SGModelRouting.DEFAULT_CONFIG : null;
+  const normalizeOptimizeStorageVal = raw => {
+    if (window.SGModelRouting && typeof window.SGModelRouting.normalizeOptimizeLevel === "function") {
+      return window.SGModelRouting.normalizeOptimizeLevel(raw, activeModelRoutingCfg);
+    }
+    const low = String(raw || "").trim().toLowerCase();
+    if (low === "thinking" || low === "flash") return "flash";
+    if (low === "pro") return "pro";
+    return "lite";
+  };
+
+  const applyOptimizeRoutingLabels = cfg => {
+    if (!cfg || !window.SGModelRouting) return;
+    activeModelRoutingCfg = cfg;
+    const seg = document.getElementById("optimize-model-seg");
+    if (seg) {
+      seg.querySelectorAll(".sg-seg-opt").forEach(btn => {
+        const val = btn.dataset.value;
+        const prof = window.SGModelRouting.resolveOptimizeProfile(val, cfg);
+        if (!prof) return;
+        const modelDisplay = cfg.models?.[prof.model]?.displayName || prof.model;
+        const thinkLabel = cfg.thinkingLevels?.[prof.thinkingLevel]?.label || prof.thinkingLevel;
+        const modelSpan = btn.querySelector ? btn.querySelector(".sg-seg-opt-model") : null;
+        const levelSpan = btn.querySelector ? btn.querySelector(".sg-seg-opt-level") : null;
+        if (modelSpan && levelSpan) {
+          modelSpan.textContent = modelDisplay;
+          levelSpan.textContent = thinkLabel;
+        } else {
+          btn.textContent = `${modelDisplay} · ${thinkLabel}`;
+        }
+        btn.title = `${prof.label} — ${prof.badgeLabel}`;
+        btn.setAttribute("aria-label", `${modelDisplay} · ${thinkLabel} (${prof.label})`);
+      });
+    }
+  };
+
+  const hydrateOptimizeSeg = wireSegmented(
+    "optimize-model-seg",
+    "optimizeModel",
+    "lite",
+    null,
+    normalizeOptimizeStorageVal
+  );
+  if (activeModelRoutingCfg) {
+    applyOptimizeRoutingLabels(activeModelRoutingCfg);
+  }
+  if (window.SGModelRouting && typeof window.SGModelRouting.loadConfigFromExtension === "function" && typeof fetch === "function") {
+    window.SGModelRouting.loadConfigFromExtension().then(res => {
+      if (res && res.config) applyOptimizeRoutingLabels(res.config);
+    }).catch(() => {});
+  } else if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+    try {
+      chrome.runtime.sendMessage({ type: "GET_MODEL_ROUTING_CONFIG" }, resp => {
+        void chrome.runtime.lastError;
+        if (resp && resp.config) applyOptimizeRoutingLabels(resp.config);
+      });
+    } catch (_e) {}
+  }
 
   const SHORTCUT_CONFIGS = [
     // General & Navigation
