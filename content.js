@@ -37,11 +37,28 @@ function sgPickSyncKeys(e, t) {
   return n
 }
 
+function sgSyncMasterLocalStorageFlag(enabled) {
+  const isOn = enabled !== false;
+  try {
+    if ("undefined" != typeof localStorage) {
+      localStorage.setItem("sg_ext_enabled", isOn ? "1" : "0");
+      if (!isOn) localStorage.setItem("sg_cp_active", "0");
+    }
+  } catch (e) {}
+  try {
+    if (!isOn && "undefined" != typeof document && document.documentElement) {
+      document.documentElement.setAttribute("data-sg-cp-active", "0");
+    }
+  } catch (e) {}
+}
+
 function sgGetBootstrapSync() {
   if (SG_IS_SILENT_BG_WORKER_TAB) return Promise.resolve(_sgBootstrapSyncCache = { extensionEnabled: !1 });
   return _sgBootstrapSyncPromise || ("undefined" != typeof chrome && chrome.storage && chrome.storage.onChanged && !_sgBootstrapSyncListenerBound && (_sgBootstrapSyncListenerBound = !0, chrome.storage.onChanged.addListener((e, t) => {
-    if ("sync" === t && _sgBootstrapSyncCache && e)
-      for (const t of Object.keys(e)) void 0 !== e[t].newValue ? _sgBootstrapSyncCache[t] = e[t].newValue : delete _sgBootstrapSyncCache[t]
+    if ("sync" === t && _sgBootstrapSyncCache && e) {
+      for (const t of Object.keys(e)) void 0 !== e[t].newValue ? _sgBootstrapSyncCache[t] = e[t].newValue : delete _sgBootstrapSyncCache[t];
+      void 0 !== e.extensionEnabled && sgSyncMasterLocalStorageFlag(!1 !== e.extensionEnabled.newValue);
+    }
   })), _sgBootstrapSyncPromise = "undefined" != typeof chrome && chrome.storage && chrome.storage.sync && "function" == typeof chrome.storage.sync.get ? new Promise(e => {
     try {
       chrome.storage.sync.get(null, t => {
@@ -63,7 +80,7 @@ function sgSyncGetCached(e, t) {
   }) : n()
 }
 sgSyncGetCached(["extensionEnabled", "focusShortcutEnabled"], e => {
-  e && (!1 === e.extensionEnabled && (isExtensionEnabled = !1), !1 === e.focusShortcutEnabled && (isFocusShortcutEnabled = !1))
+  e && (sgSyncMasterLocalStorageFlag(!1 !== e.extensionEnabled), !1 === e.extensionEnabled && (isExtensionEnabled = !1), !1 === e.focusShortcutEnabled && (isFocusShortcutEnabled = !1))
 });
 const guideUrl = "undefined" != typeof chrome && chrome.runtime && "function" == typeof chrome.runtime.getURL ? chrome.runtime.getURL("guide.html") : "";
 
@@ -1678,10 +1695,8 @@ function enableArrowNavigation(e, t, n) {
 }
 chrome.runtime.onMessage.addListener(e => {
   if ("ENABLE_TRASHCAN" === e.type) window.isTrashcanEnabled = !0;
-  else if ("DISABLE_TRASHCAN" === e.type) {
-    window.isTrashcanEnabled = !1;
-    document.querySelectorAll("mat-dialog-container, .mat-mdc-dialog-container").forEach(e => {})
-  } else if ("ENABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !0, initDownloadAudio();
+  else if ("DISABLE_TRASHCAN" === e.type) window.isTrashcanEnabled = !1;
+  else if ("ENABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !0, initDownloadAudio();
   else if ("DISABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !1, removeAllDownloadAudioButtons(), downloadAudioObserver && (downloadAudioObserver.disconnect(), downloadAudioObserver = null);
   else if ("ENABLE_BOOKMARKS" === e.type) isBookmarksEnabled = !0, sgLoadBookmarks().then(() => {
     initBookmarks(), sgApplyAllBookmarkStates(), sgRefreshBookmarksHeaderButton()
@@ -1694,7 +1709,8 @@ chrome.runtime.onMessage.addListener(e => {
     _sgWelcomeSettingsOpen = !0, sgCancelWelcomeTourTimer();
     const e = document.getElementById("sg-settings-reminder-popup");
     e && e.remove()
-  } else "SETTINGS_POPUP_CLOSED" === e.type && (_sgWelcomeSettingsOpen = !1, sgMaybeScheduleWelcomeTour())
+  } else "SETTINGS_POPUP_CLOSED" === e.type && (_sgWelcomeSettingsOpen = !1, sgMaybeScheduleWelcomeTour());
+  return !1;
 });
 let downloadAudioObserver = null,
   isDownloadAudioEnabled = !0;
@@ -2755,13 +2771,16 @@ function switchModeSilent(e) {
       thinking: 1,
       pro: 2
     } [t],
-    r = e => {
-      const n = "bard-mode-option-" + t;
-      for (const t of e)
-        if (t.getAttribute("data-test-id") === n) return t;
-      for (const n of e)
-        if (parseModeFromButtonText(n.textContent || "") === t) return n;
-      return void 0 !== o && o < e.length ? e[o] : null
+    isAutoOpt = item => /\btự động\b|\bautomatic\b|\bauto\b/.test((item.textContent || "").toLowerCase()),
+    r = items => {
+      const k = "bard-mode-option-" + t;
+      for (const opt of items)
+        if (opt.getAttribute("data-test-id") === k) return opt;
+      for (const opt of items)
+        if (parseModeFromButtonText(opt.textContent || "") === t) return opt;
+      const nonAuto = Array.from(items).filter(opt => !isAutoOpt(opt));
+      if (void 0 !== o && o < nonAuto.length) return nonAuto[o];
+      return void 0 !== o && o < items.length ? items[o] : null
     },
     s = e => e.classList.contains("is-selected") || e.classList.contains("selected") || "true" === e.getAttribute("aria-checked"),
     a = e => e.disabled || "true" === e.getAttribute("disabled") || "true" === e.getAttribute("aria-disabled"),
@@ -3081,7 +3100,8 @@ function initDailyPromptCounter() {
       void 0 !== e.dailyCounterVisible && (isDailyCounterVisible = !1 !== e.dailyCounterVisible.newValue, updateCounterPosition()), void 0 !== e.usageCounterShowPct && (_ucShowPct = !1 !== e.usageCounterShowPct.newValue, n = !0), void 0 !== e.usageCounterShowTime && (_ucShowTime = !0 === e.usageCounterShowTime.newValue, n = !0), n && _ucUpdateDisplay(_ucLastParsed)
     });
     chrome.runtime.onMessage.addListener(e => {
-      "SHOW_DAILY_COUNTER" === e.type ? (isDailyCounterVisible = !0, dailyPromptCounterElement && (dailyPromptCounterElement.style.display = "flex"), updateCounterPosition()) : "HIDE_DAILY_COUNTER" === e.type && (isDailyCounterVisible = !1, dailyPromptCounterElement && (dailyPromptCounterElement.style.display = "none"))
+      "SHOW_DAILY_COUNTER" === e.type ? (isDailyCounterVisible = !0, dailyPromptCounterElement && (dailyPromptCounterElement.style.display = "flex"), updateCounterPosition()) : "HIDE_DAILY_COUNTER" === e.type && (isDailyCounterVisible = !1, dailyPromptCounterElement && (dailyPromptCounterElement.style.display = "none"));
+      return !1;
     });
   }
   initDailyCounterElement(), setTimeout(() => {
@@ -3138,8 +3158,14 @@ let _sgModeButtonObserver = null,
   _sgLastModeButtonText = "";
 
 function parseModeFromButtonText(e) {
-  const t = (e || "").toLowerCase().trim();
-  return t.includes("flash-lite") || t.includes("flash lite") ? "fast" : t.includes("thinking") ? "thinking" : t.includes("pro") ? "pro" : t.includes("fast") ? "fast" : t.includes("flash") ? "thinking" : null
+  const t = (e || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  if (t.includes("flash-lite") || t.includes("flash lite") || t.includes("hydrogen") || t.includes("trợ giúp hằng ngày") || t.includes("everyday") || t.includes("daily")) return "fast";
+  if (t.includes("neon") || t.includes("phân tích sâu hơn") || t.includes("deeper analysis") || t.includes("deep analysis") || t.includes("thinking")) return "thinking";
+  if (t.includes("carbon") || t.includes("lập trình và xử lý công việc phức tạp") || t.includes("coding and complex") || t.includes("complex work") || /\bpro\b/.test(t)) return "pro";
+  if (/\bfast\b/.test(t) || t.includes("fast")) return "fast";
+  if (/\bflash\b/.test(t)) return "thinking";
+  return null;
 }
 
 function sgGetNativeModeButtonText(e) {
@@ -4227,6 +4253,7 @@ function ensureModeMenuHideStyle() {
 function switchMode(e, t = !1, n = null) {
   const o = e.toLowerCase(),
     r = "fast" === o || "flash-lite" === o || "flashlite" === o ? "Flash-Lite" : "thinking" === o || "flash" === o ? "Flash" : "pro" === o ? "Pro" : e,
+    p = "flash-lite" === o || "flashlite" === o ? "fast" : "flash" === o ? "thinking" : o,
     s = document.querySelector('[data-test-id="bard-mode-menu-button"]');
   if (!s) return t ? void showToast("Mode selector not found", "error") : void setTimeout(() => switchMode(e, !0, n), 500);
   const a = {
@@ -4237,6 +4264,22 @@ function switchMode(e, t = !1, n = null) {
       flash: 1,
       pro: 2
     } [o],
+    isAutoOption = opt => /\btự động\b|\bautomatic\b|\bauto\b/.test((opt.textContent || "").toLowerCase()),
+    findOption = list => {
+      const idPrimary = "bard-mode-option-" + o,
+        idCanonical = "bard-mode-option-" + p;
+      for (const opt of list) {
+        const tid = opt.getAttribute("data-test-id");
+        if (tid === idPrimary || tid === idCanonical) return opt;
+      }
+      for (const opt of list) {
+        const txt = (opt.textContent || "").toLowerCase().trim();
+        if (parseModeFromButtonText(txt) === p || txt.startsWith(o) || txt.startsWith("gemini " + o) || txt === o) return opt;
+      }
+      const nonAuto = Array.from(list).filter(opt => !isAutoOption(opt));
+      if (void 0 !== a && a < nonAuto.length) return nonAuto[a];
+      return void 0 !== a && a < list.length ? list[a] : null;
+    },
     i = document.querySelectorAll('[data-test-id^="bard-mode-option-"]'),
     l = e => e.classList.contains("is-selected") || e.classList.contains("selected") || "true" === e.getAttribute("aria-checked");
   if (i.length > 0) {
@@ -4244,22 +4287,12 @@ function switchMode(e, t = !1, n = null) {
     const e = () => {
       setTimeout(() => document.body.classList.remove("sg-hiding-mode-menu"), 350)
     };
-    for (const t of i) {
-      const a = (t.textContent || "").toLowerCase().trim();
-      if (a.startsWith(o) || a.startsWith("gemini " + o) || a === o) return l(t) ? (e(), void showToast(`Already on ${r} mode`, "info")) : t.disabled || "true" === t.getAttribute("disabled") || "true" === t.getAttribute("aria-disabled") ? (s.click(), showToast(`${r} usage limit reached`, "info"), cleanupModeButtonFocusAfterForcedClose(n), void e()) : (t.click(), cleanupModeButtonFocus(n), void e())
-    }
-    if (void 0 !== a && a < i.length) {
-      const t = i[a];
-      return l(t) ? (e(), void showToast(`Already on ${r} mode`, "info")) : t.disabled || "true" === t.getAttribute("disabled") || "true" === t.getAttribute("aria-disabled") ? (s.click(), showToast(`${r} usage limit reached`, "info"), cleanupModeButtonFocusAfterForcedClose(n), void e()) : (t.click(), cleanupModeButtonFocus(n), void e())
-    }
+    const matched = findOption(i);
+    if (matched) return l(matched) ? (e(), void showToast(`Already on ${r} mode`, "info")) : matched.disabled || "true" === matched.getAttribute("disabled") || "true" === matched.getAttribute("aria-disabled") ? (s.click(), showToast(`${r} usage limit reached`, "info"), cleanupModeButtonFocusAfterForcedClose(n), void e()) : (matched.click(), cleanupModeButtonFocus(n), void e());
     document.body.classList.remove("sg-hiding-mode-menu")
   }
-  const c = (s.textContent || "").toLowerCase(),
-    d = /\b(fast|thinking|pro|flash)\b|flash-lite/.test(c);
-  let u = null;
-  c.includes("flash-lite") || c.includes("flash lite") || c.startsWith("fast") || c.includes("gemini fast") ? u = "fast" : c.startsWith("thinking") || c.includes("gemini thinking") || /\bflash\b/.test(c) ? u = "thinking" : (c.startsWith("pro") || c.includes("gemini pro")) && (u = "pro");
-  const p = "flash-lite" === o || "flashlite" === o ? "fast" : "flash" === o ? "thinking" : o;
-  if (d && u === p) return void showToast(`Already on ${r} mode`, "info");
+  const u = parseModeFromButtonText(s.textContent || "");
+  if (u && u === p) return void showToast(`Already on ${r} mode`, "info");
   if (window._sgCurrentMode && window._sgCurrentMode === p) return void showToast(`Already on ${r} mode`, "info");
   const g = s.querySelector("button.input-area-switch") || s.querySelector("button") || s;
   ensureModeMenuHideStyle(), document.body.classList.add("sg-hiding-mode-menu"), blockModeBtnFocusFor(600);
@@ -4274,21 +4307,8 @@ function switchMode(e, t = !1, n = null) {
     const e = document.querySelectorAll('[data-test-id^="bard-mode-option-"]');
     if (0 === e.length) return void(f >= 60 && (clearInterval(y), clearTimeout(h), m(), showToast(`${r} mode not found`, "error")));
     clearInterval(y);
-    const t = "bard-mode-option-" + o;
-    let s = null;
-    for (const n of e)
-      if (n.getAttribute("data-test-id") === t) {
-        s = n;
-        break
-      } if (!s)
-      for (const t of e) {
-        const e = (t.textContent || "").toLowerCase().trim();
-        if (e.startsWith(o) || e.startsWith("gemini " + o) || e === o) {
-          s = t;
-          break
-        }
-      }
-    if (!s && void 0 !== a && a < e.length && (s = e[a]), !s) return clearTimeout(h), m(), void showToast(`${r} mode not found`, "error");
+    const s = findOption(e);
+    if (!s) return clearTimeout(h), m(), void showToast(`${r} mode not found`, "error");
     return s.classList.contains("is-selected") || s.classList.contains("selected") || "true" === s.getAttribute("aria-checked") ? (g.click(), clearTimeout(h), setTimeout(m, 350), window._sgCurrentMode = p, showToast(`Already on ${r} mode`, "info"), void cleanupModeButtonFocusAfterForcedClose(n)) : s.disabled || "true" === s.getAttribute("disabled") || "true" === s.getAttribute("aria-disabled") ? (g.click(), clearTimeout(h), setTimeout(m, 350), showToast(`${r} usage limit reached`, "info"), void cleanupModeButtonFocusAfterForcedClose(n)) : (s.click(), window._sgCurrentMode = p, cleanupModeButtonFocus(n, 100), clearTimeout(h), void setTimeout(m, 350))
   }, 25)
 }
@@ -5239,67 +5259,333 @@ function sgBuildQueueIcon(e, t) {
 function resolveQueueModeBadge(e) {
   if (!e) return null;
   const t = String(e).toLowerCase();
-  return "fast" === t || "flash-lite" === t || "flashlite" === t ? {
+  return "fast" === t || "flash-lite" === t || "flashlite" === t || "h" === t || "hydrogen" === t ? {
     iconKind: "bolt",
-    label: "Flash-Lite"
-  } : "thinking" === t || "flash" === t ? {
+    label: "h" === t || "hydrogen" === t ? "4 Hydrogen" : "Flash-Lite"
+  } : "thinking" === t || "flash" === t || "ne" === t || "neon" === t || "ar" === t || "argon" === t ? {
     iconKind: "spark",
-    label: "Flash"
-  } : "pro" === t ? {
+    label: "ne" === t || "neon" === t ? "4 Neon" : ("ar" === t || "argon" === t ? "4 Argon" : "Flash")
+  } : "pro" === t || "c" === t || "carbon" === t ? {
     iconKind: "diamond",
-    label: "Pro"
+    label: "c" === t || "carbon" === t ? "4 Carbon" : "Pro"
   } : null
+}
+
+function sgNormalizeQueueItem(raw) {
+  if (typeof raw === "string") {
+    return { text: raw, mode: null, periodicSymbol: null, thinkingLevel: null, skills: [] };
+  }
+  const obj = raw && typeof raw === "object" ? raw : {};
+  const skills = Array.isArray(obj.skills)
+    ? Array.from(new Set(obj.skills.map(s => String(s || "").trim()).filter(Boolean)))
+    : [];
+  return {
+    text: String(obj.text || ""),
+    mode: obj.mode ? String(obj.mode) : null,
+    periodicSymbol: obj.periodicSymbol ? String(obj.periodicSymbol) : null,
+    thinkingLevel: obj.thinkingLevel ? String(obj.thinkingLevel) : null,
+    skills
+  };
+}
+
+function sgGetQueueAvailableModels() {
+  const options = [];
+  if (typeof sgPeriodicGetAllReleasedElements === "function") {
+    try {
+      const released = sgPeriodicGetAllReleasedElements();
+      for (const el of released || []) {
+        if (!el || !el.symbol || el.locked) continue;
+        options.push({
+          key: `periodic:${el.symbol}`,
+          periodicSymbol: el.symbol,
+          mode: el.realMode || null,
+          label: el.modelLabel || `${el.symbol} · ${el.name}`
+        });
+      }
+    } catch (_e) {}
+  }
+  if (options.length === 0) {
+    options.push(
+      { key: "mode:fast", periodicSymbol: null, mode: "fast", label: "Flash-Lite (Fast)" },
+      { key: "mode:thinking", periodicSymbol: null, mode: "thinking", label: "Flash (Thinking)" },
+      { key: "mode:pro", periodicSymbol: null, mode: "pro", label: "Pro" }
+    );
+  }
+  return options;
+}
+
+function sgGetQueueThinkingLevelsForModel(periodicSymbol) {
+  if (periodicSymbol && typeof sgPeriodicGetThinkingLevels === "function") {
+    try {
+      const lvls = sgPeriodicGetThinkingLevels(periodicSymbol);
+      if (Array.isArray(lvls) && lvls.length > 0) {
+        return lvls.map(l => ({ value: l.value, label: l.label || l.value }));
+      }
+    } catch (_e) {}
+  }
+  return [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "extended", label: "Extended" }
+  ];
+}
+
+function sgGetQueueAvailableSkills() {
+  if (typeof sgEffectiveSkills === "undefined" || !Array.isArray(sgEffectiveSkills)) return [];
+  const excluded = new Set(["acknowledgment", "orchestrate-mode"]);
+  return sgEffectiveSkills
+    .filter(s => s && s.id && s.enabled !== false && !excluded.has(String(s.id).toLowerCase()))
+    .map(s => ({ id: s.id, name: s.name || s.id, aliases: Array.isArray(s.aliases) ? s.aliases : [] }));
+}
+
+function sgBuildQueueDispatchPrompt(rawText, skills) {
+  const cleaned = String(rawText || "").replace(/^\[(PROMPT|CHAIN|QA):[^\]]+\]\s*/s, "");
+  const skillList = Array.isArray(skills) ? skills.map(s => String(s || "").trim()).filter(Boolean) : [];
+  if (skillList.length === 0) return cleaned;
+
+  const available = sgGetQueueAvailableSkills();
+  const byId = new Map(available.map(s => [s.id.toLowerCase(), s]));
+  const missingTokens = [];
+  const lowerCleaned = cleaned.toLowerCase();
+
+  for (const sid of skillList) {
+    const sidLow = sid.toLowerCase();
+    const meta = byId.get(sidLow);
+    const hasId = new RegExp(`(?:^|\\s)@${sidLow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "i").test(cleaned);
+    const hasAlias = Boolean(meta && meta.aliases.some(a => a && lowerCleaned.includes(String(a).toLowerCase())));
+    if (!hasId && !hasAlias) {
+      missingTokens.push(`@${sid}`);
+    }
+  }
+  if (missingTokens.length === 0) return cleaned;
+  return `${missingTokens.join(" ")} ${cleaned}`.trim();
+}
+
+function moveQueuedMessage(index, delta) {
+  const target = index + delta;
+  if (index < 0 || index >= messageQueue.length || target < 0 || target >= messageQueue.length) return;
+  const item = messageQueue[index];
+  messageQueue[index] = messageQueue[target];
+  messageQueue[target] = item;
+  saveQueueToStorage();
+  updateQueueDisplay();
+}
+
+function updateQueueItemRoute(index, patch) {
+  if (index < 0 || index >= messageQueue.length) return;
+  const norm = sgNormalizeQueueItem(messageQueue[index]);
+  messageQueue[index] = Object.assign({}, norm, patch || {});
+  saveQueueToStorage();
+  updateQueueDisplay();
 }
 
 function updateQueueDisplay() {
   queueDisplayElement || createQueueDisplay();
-  const e = queueDisplayElement.querySelector("#sg-queue-list");
-  e.innerHTML = "", messageQueue.length > 0 && isQueueingEnabled && isQueueDisplayVisible ? (queueDisplayElement.style.display = "block", messageQueue.forEach((t, n) => {
-    const o = "string" == typeof t ? t : t.text || "",
-      r = "string" == typeof t ? null : t.mode,
-      s = "string" == typeof t ? null : t.thinkingLevel,
-      a = document.createElement("div");
-    a.style.cssText = `\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        background-color: ${isDarkTheme()?"#2d2e30":"#f1f3f4"};\n        border-radius: 8px;\n        padding: 10px 8px 10px 12px;\n        margin: 6px 0;\n        font-size: 13px;\n        ${0===n?`border: 1px solid ${isDarkTheme()?"#8ab4f8":"#4285f4"}; background-color: ${isDarkTheme()?"#1a3a5c":"#e8f0fe"};`:""}\n      `;
-    const i = document.createElement("span");
-    i.style.cssText = "flex-grow: 1; margin-right: 8px; word-wrap: break-word; line-height: 1.4;";
-    const l = resolveQueueModeBadge(r),
-      c = {
-        extended: "Extended thinking",
-        medium: "Thinking level: Medium",
-        high: "Thinking level: High"
-      } [String(s || "").toLowerCase()] || null,
-      d = (e, t) => {
-        const n = document.createElement("span");
-        n.style.cssText = "display:inline-flex;align-items:center;margin-right:4px;vertical-align:middle;", n.title = t, n.appendChild(sgBuildQueueIcon(e, 14)), i.appendChild(n)
-      },
-      u = o.match(/^\[(PROMPT|CHAIN|QA):([^\]]+)\]\s*(.*)/s);
-    if (u) {
-      const e = u[1],
-        t = u[2],
-        n = u[3];
-      l && d(l.iconKind, l.label + " mode"), c && d("science", c);
-      const o = document.createElement("strong");
-      o.textContent = `${e}: `, o.style.color = "CHAIN" === e ? "#f4b400" : "#4285f4";
-      const r = document.createElement("span");
-      r.textContent = t + " ", r.style.fontWeight = "500";
-      const s = document.createElement("span");
-      s.textContent = n.length > 40 ? n.substring(0, 40) + "..." : n, s.style.opacity = "0.8", i.appendChild(o), i.appendChild(r), i.appendChild(s), i.title = n
-    } else {
-      l && d(l.iconKind, l.label + " mode"), c && d("science", c);
-      const e = document.createElement("span");
-      e.textContent = o.length > 50 ? o.substring(0, 50) + "..." : o, i.appendChild(e), i.title = o
+  const listEl = queueDisplayElement.querySelector("#sg-queue-list");
+  if (!listEl) return;
+  while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+
+  if (!(messageQueue.length > 0 && isQueueingEnabled && isQueueDisplayVisible)) {
+    queueDisplayElement.style.display = "none";
+    return;
+  }
+
+  queueDisplayElement.style.display = "block";
+  const modelOptions = sgGetQueueAvailableModels();
+  const skillOptions = sgGetQueueAvailableSkills();
+
+  messageQueue.forEach((rawItem, idx) => {
+    const item = sgNormalizeQueueItem(rawItem);
+    const card = document.createElement("div");
+    card.className = `sg-queue-item-card${idx === 0 ? " sg-queue-item-next" : ""}`;
+
+    const topRow = document.createElement("div");
+    topRow.className = "sg-queue-item-top";
+
+    const textWrap = document.createElement("span");
+    textWrap.className = "sg-queue-item-text";
+
+    const idxPill = document.createElement("span");
+    idxPill.className = "sg-queue-idx";
+    idxPill.textContent = `#${idx + 1}`;
+    textWrap.appendChild(idxPill);
+
+    const badge = resolveQueueModeBadge(item.periodicSymbol || item.mode);
+    if (badge) {
+      const iconHost = document.createElement("span");
+      iconHost.className = "sg-queue-mode-icon";
+      iconHost.title = `${badge.label}${item.thinkingLevel ? ` · ${item.thinkingLevel}` : ""}`;
+      iconHost.appendChild(sgBuildQueueIcon(badge.iconKind, 13));
+      textWrap.appendChild(iconHost);
     }
-    const p = document.createElement("button");
-    p.innerHTML = "×", p.title = "Delete this message", p.style.cssText = `\n        background: none;\n        border: none;\n        font-size: 18px;\n        color: ${isDarkTheme()?"#9aa0a6":"#80868b"};\n        cursor: pointer;\n        padding: 0 6px;\n        line-height: 1;\n        border-radius: 50%;\n        transition: all 0.15s ease;\n      `, p.addEventListener("mouseenter", () => {
-      p.style.backgroundColor = isDarkTheme() ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)", p.style.color = isDarkTheme() ? "#e3e3e3" : "#202124"
-    }), p.addEventListener("mouseleave", () => {
-      p.style.backgroundColor = "transparent", p.style.color = isDarkTheme() ? "#9aa0a6" : "#80868b"
-    }), p.addEventListener("click", () => deleteMessageFromQueue(n)), a.appendChild(i), a.appendChild(p), e.appendChild(a)
-  })) : queueDisplayElement.style.display = "none"
+
+    const prefixMatch = item.text.match(/^\[(PROMPT|CHAIN|QA):([^\]]+)\]\s*(.*)/s);
+    if (prefixMatch) {
+      const kind = prefixMatch[1];
+      const tag = prefixMatch[2];
+      const bodyTxt = prefixMatch[3];
+      const kindEl = document.createElement("strong");
+      kindEl.textContent = `${kind}: `;
+      kindEl.style.color = kind === "CHAIN" ? "#f4b400" : "#4285f4";
+      const tagEl = document.createElement("span");
+      tagEl.textContent = `${tag} `;
+      tagEl.style.fontWeight = "500";
+      const bodyEl = document.createElement("span");
+      bodyEl.textContent = bodyTxt.length > 42 ? bodyTxt.slice(0, 42) + "..." : bodyTxt;
+      bodyEl.style.opacity = "0.82";
+      textWrap.appendChild(kindEl);
+      textWrap.appendChild(tagEl);
+      textWrap.appendChild(bodyEl);
+      textWrap.title = bodyTxt;
+    } else {
+      const spanTxt = document.createElement("span");
+      spanTxt.textContent = item.text.length > 56 ? item.text.slice(0, 56) + "..." : item.text;
+      textWrap.appendChild(spanTxt);
+      textWrap.title = item.text;
+    }
+
+    const controls = document.createElement("div");
+    controls.className = "sg-queue-item-controls";
+
+    const mkActionBtn = (txt, title, onClick, disabled = false) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sg-queue-action-btn";
+      b.textContent = txt;
+      b.title = title;
+      b.disabled = disabled;
+      b.addEventListener("click", ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onClick();
+      });
+      return b;
+    };
+
+    if (messageQueue.length > 1) {
+      controls.appendChild(mkActionBtn("↑", "Move up", () => moveQueuedMessage(idx, -1), idx === 0));
+      controls.appendChild(mkActionBtn("↓", "Move down", () => moveQueuedMessage(idx, 1), idx === messageQueue.length - 1));
+    }
+    controls.appendChild(mkActionBtn("×", "Delete this message", () => deleteMessageFromQueue(idx)));
+
+    topRow.appendChild(textWrap);
+    topRow.appendChild(controls);
+    card.appendChild(topRow);
+
+    const routeBar = document.createElement("div");
+    routeBar.className = "sg-queue-route-bar";
+
+    const modelSelect = document.createElement("select");
+    modelSelect.className = "sg-queue-select";
+    modelSelect.setAttribute("aria-label", `Model for queued task #${idx + 1}`);
+    const defModelOpt = document.createElement("option");
+    defModelOpt.value = "";
+    defModelOpt.textContent = "Model: Current";
+    modelSelect.appendChild(defModelOpt);
+
+    const currentModelKey = item.periodicSymbol
+      ? `periodic:${item.periodicSymbol}`
+      : (item.mode ? `mode:${String(item.mode).toLowerCase()}` : "");
+
+    for (const mOpt of modelOptions) {
+      const oEl = document.createElement("option");
+      oEl.value = mOpt.key;
+      oEl.textContent = mOpt.label;
+      if (mOpt.key === currentModelKey || (!item.periodicSymbol && item.mode && mOpt.mode === String(item.mode).toLowerCase())) {
+        oEl.selected = true;
+      }
+      modelSelect.appendChild(oEl);
+    }
+    modelSelect.addEventListener("change", () => {
+      const val = modelSelect.value;
+      if (!val) {
+        updateQueueItemRoute(idx, { periodicSymbol: null, mode: null });
+        return;
+      }
+      if (val.startsWith("periodic:")) {
+        const sym = val.slice("periodic:".length);
+        const found = modelOptions.find(m => m.periodicSymbol === sym);
+        updateQueueItemRoute(idx, { periodicSymbol: sym, mode: found ? found.mode : null });
+      } else if (val.startsWith("mode:")) {
+        updateQueueItemRoute(idx, { periodicSymbol: null, mode: val.slice("mode:".length) });
+      }
+    });
+    routeBar.appendChild(modelSelect);
+
+    const thinkSelect = document.createElement("select");
+    thinkSelect.className = "sg-queue-select";
+    thinkSelect.setAttribute("aria-label", `Thinking level for queued task #${idx + 1}`);
+    const defThinkOpt = document.createElement("option");
+    defThinkOpt.value = "";
+    defThinkOpt.textContent = "Think: Auto";
+    thinkSelect.appendChild(defThinkOpt);
+    const tLevels = sgGetQueueThinkingLevelsForModel(item.periodicSymbol);
+    for (const lv of tLevels) {
+      const oEl = document.createElement("option");
+      oEl.value = lv.value;
+      oEl.textContent = lv.label;
+      if (String(item.thinkingLevel || "").toLowerCase() === String(lv.value).toLowerCase()) {
+        oEl.selected = true;
+      }
+      thinkSelect.appendChild(oEl);
+    }
+    thinkSelect.addEventListener("change", () => {
+      updateQueueItemRoute(idx, { thinkingLevel: thinkSelect.value || null });
+    });
+    routeBar.appendChild(thinkSelect);
+
+    if (skillOptions.length > 0) {
+      const skillSelect = document.createElement("select");
+      skillSelect.className = "sg-queue-select sg-queue-skill-select";
+      skillSelect.setAttribute("aria-label", `Add skill to queued task #${idx + 1}`);
+      const phOpt = document.createElement("option");
+      phOpt.value = "";
+      phOpt.textContent = "+ Skill";
+      skillSelect.appendChild(phOpt);
+      for (const sk of skillOptions) {
+        if (item.skills.includes(sk.id)) continue;
+        const oEl = document.createElement("option");
+        oEl.value = sk.id;
+        oEl.textContent = `@${sk.id}`;
+        skillSelect.appendChild(oEl);
+      }
+      skillSelect.addEventListener("change", () => {
+        const picked = skillSelect.value;
+        if (!picked) return;
+        const nextSkills = item.skills.includes(picked) ? item.skills : [...item.skills, picked];
+        updateQueueItemRoute(idx, { skills: nextSkills });
+      });
+      routeBar.appendChild(skillSelect);
+    }
+
+    card.appendChild(routeBar);
+
+    if (item.skills.length > 0) {
+      const skillsRow = document.createElement("div");
+      skillsRow.className = "sg-queue-skills-row";
+      for (const sid of item.skills) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "sg-queue-skill-chip";
+        chip.title = `Remove @${sid}`;
+        chip.textContent = `@${sid} ×`;
+        chip.addEventListener("click", ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          updateQueueItemRoute(idx, { skills: item.skills.filter(s => s !== sid) });
+        });
+        skillsRow.appendChild(chip);
+      }
+      card.appendChild(skillsRow);
+    }
+
+    listEl.appendChild(card);
+  });
 }
 
 function tryEnqueueMessage(e) {
-  return messageQueue.push(e), saveQueueToStorage(), updateQueueDisplay(), !0
+  return messageQueue.push(sgNormalizeQueueItem(e)), saveQueueToStorage(), updateQueueDisplay(), !0
 }
 
 function handleQueueKeydown(e) {
@@ -5308,15 +5594,34 @@ function handleQueueKeydown(e) {
     e.preventDefault(), e.stopPropagation();
     const t = document.querySelector(QUEUE_INPUT_SELECTOR);
     if (t) {
-      const e = extractInputText(t).trim();
-      if (e) {
-        const n = getCurrentThinkingLevel();
+      const textVal = extractInputText(t).trim();
+      if (textVal) {
+        const thinkLvl = getCurrentThinkingLevel();
+        let activePeriodicSymbol = null;
+        if (typeof sgPeriodicReadState === "function") {
+          try {
+            const pState = sgPeriodicReadState();
+            if (pState && pState.selectedType === "element" && pState.released && pState.symbol) {
+              activePeriodicSymbol = pState.symbol;
+            }
+          } catch (_e) {}
+        }
         if (!tryEnqueueMessage({
-            text: e,
+            text: textVal,
             mode: getCurrentMode(),
-            thinkingLevel: n
+            periodicSymbol: activePeriodicSymbol,
+            thinkingLevel: thinkLvl,
+            skills: []
           })) return;
-        "DIV" === t.tagName ? t.innerHTML = "<p><br></p>" : t.value = "", triggerWordCounterUpdate()
+        if ("DIV" === t.tagName) {
+          t.replaceChildren();
+          const p = document.createElement("p");
+          p.appendChild(document.createElement("br"));
+          t.appendChild(p);
+        } else {
+          t.value = "";
+        }
+        triggerWordCounterUpdate();
       }
     }
   }
@@ -5356,24 +5661,36 @@ async function sendNextQueuedMessage() {
     e.preventDefault(), e.stopImmediatePropagation()
   };
   t.addEventListener("keydown", o, !0), t.addEventListener("keypress", o, !0), t.addEventListener("paste", o, !0), isSendingFromQueue = !0;
-  const r = messageQueue.shift();
+  const r = sgNormalizeQueueItem(messageQueue.shift());
   saveQueueToStorage(), updateQueueDisplay();
-  const s = "string" == typeof r ? r : r.text || "",
-    a = "string" == typeof r ? null : r.mode,
-    i = "string" == typeof r ? null : r.thinkingLevel;
-  if (a && (switchMode(a), await new Promise(e => setTimeout(e, 400))), i) {
+
+  const periodicElem = r.periodicSymbol && typeof sgPeriodicGetElement === "function"
+    ? sgPeriodicGetElement(r.periodicSymbol)
+    : null;
+  if (periodicElem && periodicElem.released && !periodicElem.locked && typeof sgPeriodicSelectElement === "function") {
     try {
-      await setThinkingLevel(i)
-    } catch (e) {}
-    await new Promise(e => setTimeout(e, 250))
+      sgPeriodicSelectElement(periodicElem, r.thinkingLevel || undefined);
+    } catch (_e) {}
+    await new Promise(res => setTimeout(res, 720));
+  } else {
+    if (r.mode && (switchMode(r.mode), await new Promise(res => setTimeout(res, 400))), r.thinkingLevel) {
+      try {
+        await setThinkingLevel(r.thinkingLevel);
+      } catch (_e) {}
+      await new Promise(res => setTimeout(res, 250));
+    }
   }
-  const l = s.replace(/^\[(PROMPT|CHAIN|QA):[^\]]+\]\s*/s, "");
+
+  const l = sgBuildQueueDispatchPrompt(r.text, r.skills);
   if ("DIV" === t.tagName) {
-    t.innerHTML = "";
+    t.replaceChildren();
     l.split("\n").forEach(line => {
       const p = document.createElement("p");
-      p.textContent = line || "";
-      if (!line) p.innerHTML = "<br>";
+      if (line) {
+        p.textContent = line;
+      } else {
+        p.appendChild(document.createElement("br"));
+      }
       t.appendChild(p);
     });
     t.classList.remove("ql-blank");
@@ -5554,6 +5871,9 @@ function handleRuntimeMessage(e) {
       isCounterFeatureEnabled = !1;
       const u = document.getElementById("sg-word-counter");
       u && (u.style.display = "none");
+      break;
+    case "SG_SYNC_MASTER_STATE":
+      isExtensionEnabled = !1 !== e.enabled, sgSyncMasterLocalStorageFlag(isExtensionEnabled);
       break;
     case "ENABLE_EXTENSION":
     case "DISABLE_EXTENSION":
@@ -6096,7 +6416,22 @@ async function executeChainStep(e) {
     } else a.value = i, a.focus();
     triggerWordCounterUpdate()
   };
-  "DIV" === a.tagName ? (a.innerHTML = `<p>${s}</p>`, a.classList.remove("ql-blank")) : a.value = s, a.dispatchEvent(new Event("input", {
+  if ("DIV" === a.tagName) {
+    a.replaceChildren();
+    String(s || "").split("\n").forEach(line => {
+      const p = document.createElement("p");
+      if (line) {
+        p.textContent = line;
+      } else {
+        p.appendChild(document.createElement("br"));
+      }
+      a.appendChild(p);
+    });
+    a.classList.remove("ql-blank");
+  } else {
+    a.value = s;
+  }
+  a.dispatchEvent(new Event("input", {
     bubbles: !0
   })), triggerWordCounterUpdate(), a.focus();
   let d = 0;
@@ -12235,7 +12570,11 @@ async function initCollapsiblePinnedChats() {
     })
   }
 }
-chrome.runtime.onMessage.addListener((e, t, n) => ("ENABLE_COLLAPSIBLE_PINNED" === e.type ? initCollapsiblePinnedChats() : "DISABLE_COLLAPSIBLE_PINNED" === e.type && (removePinnedSectionHeader(), pinnedChatsObserver && (pinnedChatsObserver.disconnect(), pinnedChatsObserver = null), _sgPinnedWrapperReclaimObserver && (_sgPinnedWrapperReclaimObserver.disconnect(), _sgPinnedWrapperReclaimObserver = null)), !1)), SG_IS_SILENT_BG_WORKER_TAB || setTimeout(initCollapsiblePinnedChats, 1500);
+chrome.runtime.onMessage.addListener((e, t, n) => {
+  if ("ENABLE_COLLAPSIBLE_PINNED" === e.type) initCollapsiblePinnedChats();
+  else if ("DISABLE_COLLAPSIBLE_PINNED" === e.type) removePinnedSectionHeader(), pinnedChatsObserver && (pinnedChatsObserver.disconnect(), pinnedChatsObserver = null), _sgPinnedWrapperReclaimObserver && (_sgPinnedWrapperReclaimObserver.disconnect(), _sgPinnedWrapperReclaimObserver = null);
+  return !1;
+}), SG_IS_SILENT_BG_WORKER_TAB || setTimeout(initCollapsiblePinnedChats, 1500);
 let _sgDragChatInProgress = !1,
   _sgDragChatListenersAttached = !1,
   _sgDragChatDropAttached = !1,
@@ -13022,6 +13361,33 @@ function showExportPopup() {
   const I = M("Styled .pdf", "styled-pdf", '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z" fill="currentColor"/><path d="M16.5 14.2l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7.7-1.6z" fill="currentColor"/></svg>');
   _.appendChild(I);
 
+  const selectiveBtn = document.createElement("button");
+  selectiveBtn.type = "button";
+  selectiveBtn.className = "sg-selective-export-entry-btn";
+  const selIconWrap = document.createElement("div");
+  selIconWrap.className = "sg-selective-export-entry-icon";
+  if (typeof sgCreateSvgIcon === "function" && typeof SG_EXPORT_SVG_PATHS !== "undefined") {
+    selIconWrap.appendChild(sgCreateSvgIcon(SG_EXPORT_SVG_PATHS, 20));
+  }
+  const selLabel = document.createElement("span");
+  selLabel.textContent = "Selective Export (Outline / Bookmarks)...";
+  selectiveBtn.appendChild(selIconWrap);
+  selectiveBtn.appendChild(selLabel);
+  selectiveBtn.addEventListener("click", () => {
+    const incThoughts = !!u.checked;
+    const incTimestamps = !!b.checked;
+    const mdProps = !!T.checked;
+    o();
+    if (typeof sgOpenSelectiveExportModal === "function") {
+      sgOpenSelectiveExportModal({
+        includeThoughts: incThoughts,
+        includeTimestamps: incTimestamps,
+        mdProperties: mdProps
+      });
+    }
+  });
+  _.appendChild(selectiveBtn);
+
   function P() {
     const e = !!u.checked;
     I.classList.toggle("sg-export-option--disabled", e), e ? (I.setAttribute("aria-disabled", "true"), I.setAttribute("data-sg-tooltip", 'Turn off "Include Gemini thoughts" to use Styled .pdf')) : (I.removeAttribute("aria-disabled"), I.removeAttribute("data-sg-tooltip"))
@@ -13712,29 +14078,117 @@ async function fetchChatTurnsViaRpc(e, t = !1) {
   }
   return r.length > 0 ? r : null
 }
+function sgFilterMessagesForSelectiveExport(messages, options = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (!list.length) return [];
+  const hasTurnSelection = Boolean(
+    options && (Array.isArray(options.selectedTurnNumbers) || options.selectedTurnNumbers instanceof Set)
+  );
+  const includeUserQueries = !(options && options.includeUserQueries === false);
+  if (!hasTurnSelection && includeUserQueries) return list;
+
+  const grouped = [];
+  let current = null;
+  for (const msg of list) {
+    if (!msg) continue;
+    const isUser = String(msg.role || "").toLowerCase() === "user";
+    if (isUser) {
+      if (current) grouped.push(current);
+      current = { turnNumber: grouped.length + 1, userMsg: msg, messages: [msg] };
+    } else if (!current) {
+      grouped.push({ turnNumber: grouped.length + 1, userMsg: null, messages: [msg] });
+    } else {
+      current.messages.push(msg);
+      grouped.push(current);
+      current = null;
+    }
+  }
+  if (current) grouped.push(current);
+
+  let allowedTurnNums = null;
+  if (hasTurnSelection) {
+    const rawSet = options.selectedTurnNumbers instanceof Set
+      ? options.selectedTurnNumbers
+      : new Set(options.selectedTurnNumbers.map(Number).filter(n => Number.isFinite(n) && n >= 1));
+    const totalOutline = Number(options.totalOutlineTurns || 0);
+    const previews = Array.isArray(options.selectedTurnPreviews) ? options.selectedTurnPreviews : [];
+
+    if (!totalOutline || grouped.length === totalOutline || previews.length === 0) {
+      allowedTurnNums = rawSet;
+    } else {
+      const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 72);
+      const matched = new Set();
+      const usedTurns = new Set();
+      const offset = Math.max(0, grouped.length - totalOutline);
+
+      for (const p of previews) {
+        const snippet = norm(p && p.userSnippet);
+        let foundTurn = null;
+        if (snippet && snippet.length >= 8) {
+          for (const g of grouped) {
+            if (usedTurns.has(g.turnNumber)) continue;
+            const gNorm = norm(g.userMsg && g.userMsg.text);
+            if (gNorm && (gNorm.startsWith(snippet) || snippet.startsWith(gNorm))) {
+              foundTurn = g.turnNumber;
+              break;
+            }
+          }
+        }
+        if (foundTurn === null && p && Number.isFinite(Number(p.turnNumber))) {
+          const shifted = Number(p.turnNumber) + offset;
+          if (shifted >= 1 && shifted <= grouped.length && !usedTurns.has(shifted)) {
+            foundTurn = shifted;
+          }
+        }
+        if (foundTurn !== null) {
+          matched.add(foundTurn);
+          usedTurns.add(foundTurn);
+        }
+      }
+      allowedTurnNums = matched.size > 0 ? matched : rawSet;
+    }
+  }
+
+  const out = [];
+  for (const g of grouped) {
+    if (allowedTurnNums && !allowedTurnNums.has(g.turnNumber)) continue;
+    for (const msg of g.messages) {
+      const isUser = String(msg.role || "").toLowerCase() === "user";
+      if (!includeUserQueries && isUser) continue;
+      out.push(msg);
+    }
+  }
+  return out;
+}
+
 async function getChatHistoryForExport(e = {}) {
   const t = !!e.includeThoughts;
   let n = !1;
+  let raw = null;
   try {
-    const e = findActiveChatInfo(),
-      o = e && e.id;
+    const info = findActiveChatInfo(),
+      o = info && info.id;
     if (o) {
       n = !0;
-      const e = await fetchChatTurnsViaRpc(o, t);
-      if (e && e.length > 0) return e
+      const rpcMsgs = await fetchChatTurnsViaRpc(o, t);
+      if (rpcMsgs && rpcMsgs.length > 0) raw = rpcMsgs;
     }
-  } catch (e) {}
-  if (n) {
-    try {
-      showToast("Using fallback export", "info")
-    } catch (e) {}
-    if (t) try {
-      showToast("Thoughts unavailable in fallback export", "info")
-    } catch (e) {}
+  } catch (err) {}
+  if (!raw) {
+    if (n) {
+      try {
+        showToast("Using fallback export", "info")
+      } catch (err) {}
+      if (t) try {
+        showToast("Thoughts unavailable in fallback export", "info")
+      } catch (err) {}
+    }
+    const o = await ensureFullChatLoaded(),
+      r = getChatHistory();
+    o();
+    raw = r;
   }
-  const o = await ensureFullChatLoaded(),
-    r = getChatHistory();
-  return o(), r
+  return sgFilterMessagesForSelectiveExport(raw, e);
 }
 
 function showInfoPopup() {
@@ -18166,6 +18620,7 @@ function initSkillPreSendInterceptor() {
     if (ev.key !== "Enter" || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || sgIsImeComposing(ev)) return;
     if (slashMenuVisible || sgSkillMenuVisible) return;
     if (typeof isCurrentlyGenerating !== "undefined" && isCurrentlyGenerating && typeof isQueueingEnabled !== "undefined" && isQueueingEnabled) return;
+    if (typeof sgGetPeriodicBlockedElement === "function" && sgGetPeriodicBlockedElement()) return;
 
     const target = ev.target;
     if (!(target instanceof Element) || isMessageEditField(target)) return;
@@ -18174,6 +18629,7 @@ function initSkillPreSendInterceptor() {
 
     const rawText = getPromptText();
     if (!rawText || !rawText.trim()) return;
+    if (typeof isOrchestratorEnabled !== "undefined" && isOrchestratorEnabled && /^\s*(?:\/orchestrate(?:-mode)?\/|\/oc\/|@orchestrate(?:-mode)?\b)\s*(.+)/is.test(rawText)) return;
     const { invokedSkills } = isSkillsInjectionEnabled
       ? sgResolveInvokedSkills(rawText, sgEffectiveSkills)
       : { invokedSkills: [] };
@@ -18190,6 +18646,7 @@ function initSkillPreSendInterceptor() {
     if ("undefined" != typeof _sgOrchBypassSendIntercept && _sgOrchBypassSendIntercept) return;
     if ((document.body && "true" === document.body.dataset.sgBgWorker) || (window.location && String(window.location.hash || "").includes("sg_orch_worker=1"))) return;
     if (!isExtensionEnabled || (!isSkillsInjectionEnabled && !isBaselineInjectionEnabled)) return;
+    if (typeof sgGetPeriodicBlockedElement === "function" && sgGetPeriodicBlockedElement()) return;
     const target = ev.target;
     if (!(target instanceof Element)) return;
     const sendBtn = target.closest(SG_SKILL_SEND_BTN_SELECTOR);
@@ -18198,6 +18655,7 @@ function initSkillPreSendInterceptor() {
 
     const rawText = getPromptText();
     if (!rawText || !rawText.trim()) return;
+    if (typeof isOrchestratorEnabled !== "undefined" && isOrchestratorEnabled && /^\s*(?:\/orchestrate(?:-mode)?\/|\/oc\/|@orchestrate(?:-mode)?\b)\s*(.+)/is.test(rawText)) return;
     const { invokedSkills } = isSkillsInjectionEnabled
       ? sgResolveInvokedSkills(rawText, sgEffectiveSkills)
       : { invokedSkills: [] };
@@ -21908,6 +22366,7 @@ let isForkHandoffEnabled = true;
 let _sgOutlineUiState = {
   expanded: false,
   showHeadings: true,
+  showAssets: true,
   bookmarkedOnly: false,
   filterText: ""
 };
@@ -21917,6 +22376,7 @@ let _sgOutlineListEl = null;
 let _sgOutlineCountBadge = null;
 let _sgOutlineSearchInput = null;
 let _sgOutlineHeadingsBtn = null;
+let _sgOutlineAssetsBtn = null;
 let _sgOutlineBmFilterBtn = null;
 let _sgOutlineSignature = "";
 let _sgOutlineTurnsSnapshot = [];
@@ -21930,6 +22390,7 @@ let _sgOutlineFlashTimer = null;
 let _sgOutlineMutationObserver = null;
 let _sgOutlineObservedChatEl = null;
 let _sgForkModalOverlay = null;
+let _sgSelectiveExportOverlay = null;
 let _sgForkCheckedPath = "";
 let _sgForkConsumeInFlight = false;
 
@@ -21943,6 +22404,8 @@ const SG_FORK_SVG_PATHS = [
 const SG_CLOSE_SVG_PATHS = ["M18 6L6 18", "M6 6l12 12"];
 const SG_HEADING_SVG_PATHS = ["M4 6h8", "M4 12h12", "M4 18h6", "M16 14l4 4", "M20 14l-4 4"];
 const SG_BOOKMARK_SVG_PATHS = ["M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"];
+const SG_ASSET_SVG_PATHS = ["M12 2L2 7l10 5 10-5-10-5z", "M2 17l10 5 10-5", "M2 12l10 5 10-5"];
+const SG_EXPORT_SVG_PATHS = ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"];
 
 function sgCreateSvgIcon(paths, size = 15) {
   const ns = "http://www.w3.org/2000/svg";
@@ -21971,6 +22434,7 @@ function sgPersistOutlineUiState() {
         [SG_OUTLINE_UI_STATE_KEY]: {
           expanded: Boolean(_sgOutlineUiState.expanded),
           showHeadings: _sgOutlineUiState.showHeadings !== false,
+          showAssets: _sgOutlineUiState.showAssets !== false,
           bookmarkedOnly: Boolean(_sgOutlineUiState.bookmarkedOnly)
         }
       });
@@ -22056,6 +22520,166 @@ function sgExtractHeadingItems(modelEl) {
       el: h
     });
   }
+  return out;
+}
+
+function sgSummarizeDiagramAssetLabel(engine, sourceText) {
+  const src = String(sourceText || "").trim();
+  if (engine === "mermaid") {
+    const titleMatch = src.match(/^\s*title\s*:?\s*(.+)$/im);
+    if (titleMatch && titleMatch[1].trim()) return titleMatch[1].trim().slice(0, 42);
+    const lines = src.split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("%%") || line === "---") continue;
+      return line.slice(0, 36);
+    }
+    return "Diagram";
+  }
+  if (engine === "chart") {
+    try {
+      const cfg = JSON.parse(src);
+      const t = cfg && cfg.options && cfg.options.plugins && cfg.options.plugins.title && cfg.options.plugins.title.text;
+      if (typeof t === "string" && t.trim()) return t.trim().slice(0, 42);
+      if (cfg && typeof cfg.type === "string") {
+        const cap = cfg.type.charAt(0).toUpperCase() + cfg.type.slice(1);
+        return `${cap} chart`;
+      }
+    } catch (_e) {}
+    return "Chart";
+  }
+  if (engine === "wavedrom") {
+    try {
+      const cfg = JSON.parse(src);
+      if (cfg && cfg.head && typeof cfg.head.text === "string" && cfg.head.text.trim()) {
+        return cfg.head.text.trim().slice(0, 42);
+      }
+      if (cfg && Array.isArray(cfg.assign)) return `Logic Circuit (${cfg.assign.length})`;
+      if (cfg && Array.isArray(cfg.reg)) return `Bitfield (${cfg.reg.length})`;
+      if (cfg && Array.isArray(cfg.signal)) return `Waveform (${cfg.signal.length})`;
+    } catch (_e) {}
+    return "Waveform";
+  }
+  if (engine === "netlist") {
+    try {
+      const cfg = JSON.parse(src);
+      if (cfg && cfg.modules && typeof cfg.modules === "object" && !Array.isArray(cfg.modules)) {
+        const modKeys = Object.keys(cfg.modules);
+        if (modKeys.length > 0 && modKeys[0].trim()) {
+          return `Circuit: ${modKeys[0].trim().slice(0, 32)}`;
+        }
+      }
+      if (cfg && typeof cfg.name === "string" && cfg.name.trim()) {
+        return `Circuit: ${cfg.name.trim().slice(0, 32)}`;
+      }
+      if (cfg && cfg.cells && typeof cfg.cells === "object" && !Array.isArray(cfg.cells)) {
+        return `Circuit (${Object.keys(cfg.cells).length} cells)`;
+      }
+    } catch (_e) {}
+    return "Circuit Schematic";
+  }
+  if (engine === "dot") {
+    const m = src.match(/^(?:strict\s+)?(?:di)?graph\s+(?:"([^"]+)"|([A-Za-z_][\w]*))/i);
+    if (m && (m[1] || m[2])) return `Graph ${(m[1] || m[2]).slice(0, 32)}`;
+    return "Graphviz DOT";
+  }
+  if (engine === "svg") {
+    const titleMatch = src.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch && titleMatch[1].trim()) return titleMatch[1].trim().slice(0, 42);
+    return "Vector Graphic";
+  }
+  return "Diagram";
+}
+
+function sgExtractTurnAssets(userEl, modelEl) {
+  const out = [];
+  const seenEls = new Set();
+  let ordinal = 0;
+
+  if (modelEl && typeof modelEl.querySelectorAll === "function") {
+    const blockNodes = modelEl.querySelectorAll("code-block, svg-code-block");
+    for (const node of blockNodes) {
+      if (!node || seenEls.has(node)) continue;
+      if (typeof node.closest === "function" && node.closest('[id^="sg-"]')) continue;
+      seenEls.add(node);
+      const tag = String(node.tagName || "").toUpperCase();
+
+      if (tag === "SVG-CODE-BLOCK") {
+        const svgSrc = typeof sgDiagramGetSvgBlockSource === "function" ? sgDiagramGetSvgBlockSource(node) : "";
+        const targetEl = (typeof node.querySelector === "function" && node.querySelector(".sg-diagram-host")) || node;
+        out.push({
+          ordinal: ordinal++,
+          kind: "diagram",
+          engine: "svg",
+          badge: "SVG",
+          label: sgSummarizeDiagramAssetLabel("svg", svgSrc),
+          el: targetEl
+        });
+        continue;
+      }
+
+      const source = typeof sgGetCodeBlockSource === "function"
+        ? sgGetCodeBlockSource(node)
+        : String((node.querySelector && (node.querySelector("code") || node.querySelector("pre")) || node).textContent || "");
+      const engine = typeof sgDetectDiagramEngine === "function" && source.trim()
+        ? sgDetectDiagramEngine(node, source)
+        : null;
+
+      if (engine) {
+        const badge = (typeof SG_DIAGRAM_LABELS !== "undefined" && SG_DIAGRAM_LABELS[engine]) || engine.toUpperCase();
+        const targetEl = (typeof node.querySelector === "function" && node.querySelector(".sg-diagram-host")) || node;
+        out.push({
+          ordinal: ordinal++,
+          kind: "diagram",
+          engine,
+          badge,
+          label: sgSummarizeDiagramAssetLabel(engine, source),
+          el: targetEl
+        });
+      } else if (source.trim()) {
+        const lang = (typeof sgDetectCodeBlockLanguage === "function" ? sgDetectCodeBlockLanguage(node) : "")
+          || sgExtractCodeBlockLang(node)
+          || "";
+        const filename = typeof sgExtractCommentFilename === "function" ? sgExtractCommentFilename(source) : "";
+        const lineCount = source.split(/\r?\n/).length;
+        const badge = (lang || "CODE").toUpperCase().slice(0, 10);
+        const label = filename
+          ? filename
+          : (lang ? `${lang} · ${lineCount}L` : `Code · ${lineCount}L`);
+        out.push({
+          ordinal: ordinal++,
+          kind: "code",
+          engine: null,
+          badge,
+          label,
+          el: node
+        });
+      }
+    }
+  }
+
+  const fileRoots = [userEl, modelEl].filter(r => r && typeof r.querySelectorAll === "function");
+  const fileSel = '[data-test-id="file-preview"], file-preview-chip, .file-preview-chip, [data-test-id="uploaded-file"], .uploaded-file-chip, response-file-preview, [data-filename]';
+  for (const root of fileRoots) {
+    for (const fNode of root.querySelectorAll(fileSel)) {
+      if (!fNode || seenEls.has(fNode)) continue;
+      if (typeof fNode.closest === "function" && fNode.closest('[id^="sg-"], code-block, svg-code-block')) continue;
+      seenEls.add(fNode);
+      const rawName = (fNode.getAttribute && (fNode.getAttribute("data-filename") || fNode.getAttribute("title") || fNode.getAttribute("aria-label")))
+        || sgReadCleanTurnText(fNode);
+      const cleanName = String(rawName || "").replace(/\s+/g, " ").trim().slice(0, 48);
+      if (!cleanName) continue;
+      out.push({
+        ordinal: ordinal++,
+        kind: "file",
+        engine: null,
+        badge: "FILE",
+        label: cleanName,
+        el: fNode
+      });
+    }
+  }
+
   return out;
 }
 
@@ -22198,6 +22822,7 @@ function sgScanConversationTurns() {
       const responseId = (container.id && container.id.trim()) || (modelEl && typeof sgGetTurnId === "function" ? sgGetTurnId(modelEl) : null) || null;
       const userText = userEl ? sgReadCleanUserQueryText(userEl) : "";
       const headings = modelEl ? sgExtractHeadingItems(modelEl) : [];
+      const assets = sgExtractTurnAssets(userEl, modelEl);
       domTurns.push({
         key: responseId || `dom-idx-${idx}`,
         responseId,
@@ -22206,6 +22831,7 @@ function sgScanConversationTurns() {
         modelEl,
         userText,
         headings,
+        assets,
         inDom: true
       });
     });
@@ -22227,6 +22853,7 @@ function sgScanConversationTurns() {
           modelEl: null,
           userText: sgReadCleanUserQueryText(node),
           headings: [],
+          assets: sgExtractTurnAssets(node, null),
           inDom: true
         };
       } else {
@@ -22240,6 +22867,7 @@ function sgScanConversationTurns() {
             modelEl: node,
             userText: "",
             headings: sgExtractHeadingItems(node),
+            assets: sgExtractTurnAssets(null, node),
             inDom: true
           };
         } else {
@@ -22249,6 +22877,7 @@ function sgScanConversationTurns() {
           }
           current.modelEl = node;
           current.headings = sgExtractHeadingItems(node);
+          current.assets = sgExtractTurnAssets(current.userEl, node);
         }
         domTurns.push(current);
         current = null;
@@ -22259,13 +22888,16 @@ function sgScanConversationTurns() {
 
   const seenKeys = new Set();
   for (const dt of domTurns) {
-    if (!dt.userText && dt.headings.length === 0 && !dt.responseId) continue;
+    if (!dt.userText && dt.headings.length === 0 && (!dt.assets || dt.assets.length === 0) && !dt.responseId) continue;
     seenKeys.add(dt.key);
     const prev = chatCache.get(dt.key);
     const mergedUserText = dt.userText || (prev ? prev.userText : "");
     const mergedHeadings = dt.headings.length > 0
       ? dt.headings
       : (prev && Array.isArray(prev.headings) ? prev.headings : []);
+    const mergedAssets = dt.assets && dt.assets.length > 0
+      ? dt.assets
+      : (prev && Array.isArray(prev.assets) ? prev.assets : []);
     const resolvedId = dt.responseId || (prev ? prev.responseId : null);
     const isBookmarked = Boolean(resolvedId && typeof sgIsBookmarked === "function" && sgIsBookmarked(resolvedId));
 
@@ -22280,6 +22912,7 @@ function sgScanConversationTurns() {
         ? (mergedUserText.length > 88 ? mergedUserText.slice(0, 85).trimEnd() + "..." : mergedUserText)
         : (prev && prev.userPreview ? prev.userPreview : "(Prompt)"),
       headings: mergedHeadings,
+      assets: mergedAssets,
       isBookmarked,
       inDom: true
     });
@@ -22293,7 +22926,8 @@ function sgScanConversationTurns() {
         containerEl: null,
         userEl: null,
         modelEl: null,
-        headings: (prev.headings || []).map(h => ({ ...h, el: null }))
+        headings: (prev.headings || []).map(h => ({ ...h, el: null })),
+        assets: (prev.assets || []).map(a => ({ ...a, el: null }))
       });
     }
   }
@@ -22318,13 +22952,18 @@ function sgComputeOutlineSignature(turns) {
     _sgOutlineLastChatId,
     _sgOutlineUiState.expanded ? "1" : "0",
     _sgOutlineUiState.showHeadings ? "1" : "0",
+    _sgOutlineUiState.showAssets ? "1" : "0",
     _sgOutlineUiState.bookmarkedOnly ? "1" : "0",
     _sgOutlineUiState.filterText || "",
     String(turns.length)
   ];
   for (const t of turns) {
     const lastHeading = t.headings.length ? t.headings[t.headings.length - 1].text.slice(0, 24) : "";
-    parts.push(`${t.key}:${t.headings.length}:${t.isBookmarked ? 1 : 0}:${t.userPreview.slice(0, 24)}:${lastHeading}`);
+    const assetsList = Array.isArray(t.assets) ? t.assets : [];
+    const lastAsset = assetsList.length
+      ? `${assetsList[assetsList.length - 1].badge}:${assetsList[assetsList.length - 1].label.slice(0, 20)}`
+      : "";
+    parts.push(`${t.key}:${t.headings.length}:${assetsList.length}:${t.isBookmarked ? 1 : 0}:${t.userPreview.slice(0, 24)}:${lastHeading}:${lastAsset}`);
   }
   return parts.join("|");
 }
@@ -22343,7 +22982,7 @@ function sgFlashOutlineTarget(targetEl) {
   }, 1250);
 }
 
-async function sgNavigateOutlineTarget(turn, headingOrdinal = null) {
+async function sgNavigateOutlineTarget(turn, headingOrdinal = null, assetOrdinal = null) {
   if (!turn) return;
   const chatHistory = (typeof domQuery === "function" && domQuery("chatHistory"))
     || document.scrollingElement
@@ -22354,6 +22993,18 @@ async function sgNavigateOutlineTarget(turn, headingOrdinal = null) {
     let container = turn.containerEl && turn.containerEl.isConnected ? turn.containerEl : null;
     if (!container && turn.responseId) {
       container = document.getElementById(turn.responseId);
+    }
+    if (assetOrdinal !== null) {
+      const aObj = Array.isArray(turn.assets) ? turn.assets[assetOrdinal] : null;
+      if (aObj && aObj.el && aObj.el.isConnected) return aObj.el;
+      if (container) {
+        const userEl = container.querySelector('user-query, .user-message, [data-message-author="user"], .query-content');
+        const modelEl = container.querySelector('model-response, .model-response, [data-message-author="model"]') || container;
+        const freshAssets = sgExtractTurnAssets(userEl, modelEl);
+        if (freshAssets[assetOrdinal] && freshAssets[assetOrdinal].el) {
+          return freshAssets[assetOrdinal].el;
+        }
+      }
     }
     if (headingOrdinal !== null) {
       const hObj = turn.headings[headingOrdinal];
@@ -22386,7 +23037,9 @@ async function sgNavigateOutlineTarget(turn, headingOrdinal = null) {
       targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     sgFlashOutlineTarget(targetEl);
-    const activeKey = headingOrdinal !== null ? `${turn.key}::h${headingOrdinal}` : turn.key;
+    const activeKey = assetOrdinal !== null
+      ? `${turn.key}::a${assetOrdinal}`
+      : (headingOrdinal !== null ? `${turn.key}::h${headingOrdinal}` : turn.key);
     sgSetOutlineActiveKey(activeKey);
   }
 }
@@ -22502,6 +23155,15 @@ function sgEnsureOutlineRoot() {
     (_sgOutlineCountBadge = sgSkillEl("span", { className: "sg-outline-count-badge", textContent: "0" }))
   ]);
 
+  const exportHeaderBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-outline-icon-btn",
+    title: "Selective Export (Outline / Bookmarks)",
+    onClick: () => sgOpenSelectiveExportModal({
+      mode: _sgOutlineUiState.bookmarkedOnly ? "bookmarked" : "custom"
+    })
+  }, sgCreateSvgIcon(SG_EXPORT_SVG_PATHS, 14));
+
   const forkHeaderBtn = sgSkillEl("button", {
     type: "button",
     className: "sg-outline-icon-btn",
@@ -22519,6 +23181,17 @@ function sgEnsureOutlineRoot() {
       sgRenderOutline(_sgOutlineTurnsSnapshot, true);
     }
   }, sgCreateSvgIcon(SG_HEADING_SVG_PATHS, 14));
+
+  _sgOutlineAssetsBtn = sgSkillEl("button", {
+    type: "button",
+    className: `sg-outline-icon-btn${_sgOutlineUiState.showAssets ? " active" : ""}`,
+    title: "Toggle indexed diagrams, code & files",
+    onClick: () => {
+      _sgOutlineUiState.showAssets = !_sgOutlineUiState.showAssets;
+      sgPersistOutlineUiState();
+      sgRenderOutline(_sgOutlineTurnsSnapshot, true);
+    }
+  }, sgCreateSvgIcon(SG_ASSET_SVG_PATHS, 14));
 
   _sgOutlineBmFilterBtn = sgSkillEl("button", {
     type: "button",
@@ -22545,7 +23218,7 @@ function sgEnsureOutlineRoot() {
   _sgOutlineSearchInput = sgSkillEl("input", {
     type: "text",
     className: "sg-outline-search",
-    placeholder: "Filter turns or headings...",
+    placeholder: "Filter turns, headings, or assets...",
     value: _sgOutlineUiState.filterText || "",
     onInput: ev => {
       _sgOutlineUiState.filterText = ev.target.value || "";
@@ -22575,8 +23248,10 @@ function sgEnsureOutlineRoot() {
         sgSkillEl("span", { className: "sg-outline-title", textContent: "Outline" })
       ]),
       sgSkillEl("div", { className: "sg-outline-header-actions" }, [
+        exportHeaderBtn,
         forkHeaderBtn,
         _sgOutlineHeadingsBtn,
+        _sgOutlineAssetsBtn,
         _sgOutlineBmFilterBtn,
         collapseBtn
       ])
@@ -22615,6 +23290,7 @@ function sgRenderOutline(turns, force = false) {
   if (panelEl) panelEl.style.display = _sgOutlineUiState.expanded ? "flex" : "none";
 
   if (_sgOutlineHeadingsBtn) _sgOutlineHeadingsBtn.classList.toggle("active", Boolean(_sgOutlineUiState.showHeadings));
+  if (_sgOutlineAssetsBtn) _sgOutlineAssetsBtn.classList.toggle("active", Boolean(_sgOutlineUiState.showAssets));
   if (_sgOutlineBmFilterBtn) _sgOutlineBmFilterBtn.classList.toggle("active", Boolean(_sgOutlineUiState.bookmarkedOnly));
 
   sgPositionOutlineRoot();
@@ -22633,8 +23309,15 @@ function sgRenderOutline(turns, force = false) {
         matchedHeadings.push(h);
       }
     }
+    const matchedAssets = [];
+    for (const a of turn.assets || []) {
+      const hay = `${a.badge || ""} ${a.label || ""} ${a.kind || ""}`.toLowerCase();
+      if (!query || hay.includes(query) || turn.userPreview.toLowerCase().includes(query)) {
+        matchedAssets.push(a);
+      }
+    }
     const turnMatches = !query || turn.userPreview.toLowerCase().includes(query) || `turn ${turn.turnNumber}`.includes(query);
-    if (!turnMatches && matchedHeadings.length === 0) continue;
+    if (!turnMatches && matchedHeadings.length === 0 && matchedAssets.length === 0) continue;
 
     renderedCount++;
     const turnBtn = sgSkillEl("button", {
@@ -22642,7 +23325,7 @@ function sgRenderOutline(turns, force = false) {
       className: `sg-outline-item sg-outline-turn${_sgOutlineActiveKey === turn.key ? " active" : ""}`,
       "data-outline-key": turn.key,
       title: turn.userText || turn.userPreview,
-      onClick: () => sgNavigateOutlineTarget(turn, null)
+      onClick: () => sgNavigateOutlineTarget(turn, null, null)
     }, [
       sgSkillEl("span", { className: "sg-outline-turn-num", textContent: `#${turn.turnNumber}` }),
       sgSkillEl("span", { className: "sg-outline-turn-text", textContent: turn.userPreview }),
@@ -22672,11 +23355,28 @@ function sgRenderOutline(turns, force = false) {
           className: `sg-outline-item sg-outline-heading sg-outline-heading--h${h.level}${_sgOutlineActiveKey === hKey ? " active" : ""}`,
           "data-outline-key": hKey,
           title: h.text,
-          onClick: () => sgNavigateOutlineTarget(turn, h.ordinal)
+          onClick: () => sgNavigateOutlineTarget(turn, h.ordinal, null)
         }, [
           sgSkillEl("span", { className: "sg-outline-heading-text", textContent: h.text })
         ]);
         _sgOutlineListEl.appendChild(hBtn);
+      }
+    }
+
+    if (_sgOutlineUiState.showAssets && matchedAssets.length > 0) {
+      for (const asset of matchedAssets) {
+        const aKey = `${turn.key}::a${asset.ordinal}`;
+        const aBtn = sgSkillEl("button", {
+          type: "button",
+          className: `sg-outline-item sg-outline-asset sg-outline-asset--${asset.kind}${_sgOutlineActiveKey === aKey ? " active" : ""}`,
+          "data-outline-key": aKey,
+          title: `${asset.badge}: ${asset.label}`,
+          onClick: () => sgNavigateOutlineTarget(turn, null, asset.ordinal)
+        }, [
+          sgSkillEl("span", { className: `sg-outline-asset-badge sg-outline-asset-badge--${asset.kind}`, textContent: asset.badge }),
+          sgSkillEl("span", { className: "sg-outline-asset-label", textContent: asset.label })
+        ]);
+        _sgOutlineListEl.appendChild(aBtn);
       }
     }
   }
@@ -22684,7 +23384,7 @@ function sgRenderOutline(turns, force = false) {
   if (renderedCount === 0) {
     _sgOutlineListEl.appendChild(sgSkillEl("div", {
       className: "sg-outline-empty",
-      textContent: _sgOutlineUiState.bookmarkedOnly ? "No bookmarked turns match." : "No matching turns or headings."
+      textContent: _sgOutlineUiState.bookmarkedOnly ? "No bookmarked turns match." : "No matching turns, headings, or assets."
     }));
   }
 }
@@ -23212,6 +23912,309 @@ async function sgOpenForkHandoffModal(initialConfig = {}) {
   await rebuildPreview();
 }
 
+function sgCloseSelectiveExportModal() {
+  if (_sgSelectiveExportOverlay) {
+    if (typeof _sgSelectiveExportOverlay._sgEscHandler === "function") {
+      document.removeEventListener("keydown", _sgSelectiveExportOverlay._sgEscHandler, true);
+    }
+    _sgSelectiveExportOverlay.remove();
+    _sgSelectiveExportOverlay = null;
+  }
+}
+
+function sgOpenSelectiveExportModal(initialConfig = {}) {
+  const turns = _sgOutlineTurnsSnapshot.length ? _sgOutlineTurnsSnapshot : sgScanConversationTurns();
+  if (!turns.length) {
+    if (typeof showToast === "function") showToast("No conversation turns available to export yet.", "info");
+    return;
+  }
+
+  sgCloseSelectiveExportModal();
+
+  const chatInfo = typeof findActiveChatInfo === "function" ? findActiveChatInfo() : null;
+  const sourceTitle = (chatInfo && chatInfo.title) || "Gemini Conversation";
+  const bookmarkedTurns = turns.filter(t => t.isBookmarked);
+  const diagramTurns = turns.filter(t => Array.isArray(t.assets) && t.assets.some(a => a.kind === "diagram"));
+
+  let selMode = initialConfig.mode === "bookmarked" && bookmarkedTurns.length > 0
+    ? "bookmarked"
+    : (initialConfig.mode === "all" ? "all" : "custom");
+  let format = initialConfig.format || "md";
+  let includeUserQueries = initialConfig.includeUserQueries !== false;
+  let includeTimestamps = initialConfig.includeTimestamps !== false;
+  let includeThoughts = Boolean(initialConfig.includeThoughts);
+  let mdProperties = Boolean(initialConfig.mdProperties);
+
+  const selectedTurns = new Set(
+    selMode === "bookmarked"
+      ? bookmarkedTurns.map(t => t.turnNumber)
+      : turns.map(t => t.turnNumber)
+  );
+
+  const getActiveTurnSet = () => {
+    if (selMode === "all") return new Set(turns.map(t => t.turnNumber));
+    if (selMode === "bookmarked") return new Set(bookmarkedTurns.map(t => t.turnNumber));
+    return new Set(selectedTurns);
+  };
+
+  const modeBtnRefs = new Map();
+  const formatBtnRefs = new Map();
+  const checklistEl = sgSkillEl("div", { className: "sg-selexp-checklist" });
+  const summaryEl = sgSkillEl("span", { className: "sg-selexp-summary" });
+  let exportBtn = null;
+  let mdPropsRow = null;
+
+  const updateSummaryAndButtons = () => {
+    const activeSet = getActiveTurnSet();
+    const count = activeSet.size;
+    summaryEl.textContent = `Selected: ${count} / ${turns.length} turn(s)`;
+    if (exportBtn) {
+      exportBtn.disabled = count === 0;
+    }
+    modeBtnRefs.forEach((btn, key) => {
+      btn.classList.toggle("active", selMode === key);
+    });
+    formatBtnRefs.forEach((btn, key) => {
+      btn.classList.toggle("active", format === key);
+    });
+    if (mdPropsRow) {
+      mdPropsRow.style.display = format === "md" ? "inline-flex" : "none";
+    }
+  };
+
+  const renderChecklist = () => {
+    checklistEl.replaceChildren();
+    const activeSet = getActiveTurnSet();
+    for (const turn of turns) {
+      const checked = activeSet.has(turn.turnNumber);
+      const cb = sgSkillEl("input", {
+        type: "checkbox",
+        checked,
+        onChange: () => {
+          if (selMode !== "custom") {
+            selectedTurns.clear();
+            activeSet.forEach(n => selectedTurns.add(n));
+            selMode = "custom";
+          }
+          if (cb.checked) selectedTurns.add(turn.turnNumber);
+          else selectedTurns.delete(turn.turnNumber);
+          updateSummaryAndButtons();
+        }
+      });
+
+      const headingCount = Array.isArray(turn.headings) ? turn.headings.length : 0;
+      const diagCount = Array.isArray(turn.assets) ? turn.assets.filter(a => a.kind === "diagram").length : 0;
+      const codeCount = Array.isArray(turn.assets) ? turn.assets.filter(a => a.kind === "code" || a.kind === "file").length : 0;
+      const metaBits = [];
+      if (headingCount > 0) metaBits.push(`${headingCount}H`);
+      if (diagCount > 0) metaBits.push(`${diagCount} diag`);
+      if (codeCount > 0) metaBits.push(`${codeCount} code`);
+
+      const row = sgSkillEl("label", { className: `sg-selexp-turn-row${checked ? " checked" : ""}` }, [
+        cb,
+        sgSkillEl("span", { className: "sg-outline-turn-num", textContent: `#${turn.turnNumber}` }),
+        sgSkillEl("span", { className: "sg-selexp-turn-preview", textContent: turn.userPreview || "(Prompt)" }),
+        metaBits.length > 0 ? sgSkillEl("span", { className: "sg-selexp-meta-pill", textContent: metaBits.join(" · ") }) : null,
+        turn.isBookmarked ? sgSkillEl("span", { className: "sg-outline-bm-mark", textContent: "★", title: "Bookmarked" }) : null
+      ]);
+      checklistEl.appendChild(row);
+    }
+    updateSummaryAndButtons();
+  };
+
+  const makeModeBtn = (key, label, disabled = false) => {
+    const btn = sgSkillEl("button", {
+      type: "button",
+      className: `sg-selexp-chip${selMode === key ? " active" : ""}`,
+      disabled,
+      onClick: () => {
+        if (disabled) return;
+        selMode = key;
+        if (key === "all") {
+          selectedTurns.clear();
+          turns.forEach(t => selectedTurns.add(t.turnNumber));
+        } else if (key === "bookmarked") {
+          selectedTurns.clear();
+          bookmarkedTurns.forEach(t => selectedTurns.add(t.turnNumber));
+        }
+        renderChecklist();
+      }
+    }, label);
+    modeBtnRefs.set(key, btn);
+    return btn;
+  };
+
+  const makeQuickBtn = (label, onClick, disabled = false) => sgSkillEl("button", {
+    type: "button",
+    className: "sg-selexp-quick-btn",
+    disabled,
+    onClick
+  }, label);
+
+  const makeFormatBtn = (key, label) => {
+    const btn = sgSkillEl("button", {
+      type: "button",
+      className: `sg-selexp-chip${format === key ? " active" : ""}`,
+      onClick: () => {
+        format = key;
+        updateSummaryAndButtons();
+      }
+    }, label);
+    formatBtnRefs.set(key, btn);
+    return btn;
+  };
+
+  const makeOptCheck = (label, initialVal, onToggle) => {
+    const input = sgSkillEl("input", {
+      type: "checkbox",
+      checked: initialVal,
+      onChange: () => onToggle(Boolean(input.checked))
+    });
+    return sgSkillEl("label", { className: "sg-selexp-opt-check" }, [
+      input,
+      sgSkillEl("span", { textContent: label })
+    ]);
+  };
+
+  mdPropsRow = makeOptCheck("Add Obsidian .md properties", mdProperties, v => { mdProperties = v; });
+
+  exportBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-selexp-primary-btn",
+    onClick: async () => {
+      const activeSet = getActiveTurnSet();
+      if (activeSet.size === 0) {
+        if (typeof showToast === "function") showToast("Select at least one turn to export.", "info");
+        return;
+      }
+      const chosenTurns = turns.filter(t => activeSet.has(t.turnNumber));
+      const exportOpts = {
+        includeThoughts,
+        includeTimestamps,
+        mdProperties,
+        includeUserQueries,
+        selectedTurnNumbers: Array.from(activeSet),
+        totalOutlineTurns: turns.length,
+        selectedTurnPreviews: chosenTurns.map(t => ({
+          turnNumber: t.turnNumber,
+          userSnippet: (t.userText || t.userPreview || "").slice(0, 80)
+        }))
+      };
+      sgCloseSelectiveExportModal();
+      if (format === "pdf" && typeof exportChatAsPdf === "function") {
+        await exportChatAsPdf(exportOpts);
+      } else if (format === "docx" && typeof exportChatAsDocx === "function") {
+        await exportChatAsDocx(exportOpts);
+      } else if (format === "txt" && typeof exportChatAsText === "function") {
+        await exportChatAsText(exportOpts);
+      } else if (typeof exportChatAsMarkdown === "function") {
+        await exportChatAsMarkdown(exportOpts);
+      }
+    }
+  }, "Export Selected");
+
+  const closeBtn = sgSkillEl("button", {
+    type: "button",
+    className: "sg-outline-icon-btn",
+    title: "Close",
+    "aria-label": "Close Selective Export",
+    onClick: () => sgCloseSelectiveExportModal()
+  }, sgCreateSvgIcon(SG_CLOSE_SVG_PATHS, 15));
+
+  const modal = sgSkillEl("div", {
+    className: "sg-fork-modal sg-selexp-modal",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-label": "Selective Export"
+  }, [
+    sgSkillEl("div", { className: "sg-fork-modal-header" }, [
+      sgSkillEl("div", {}, [
+        sgSkillEl("h3", { className: "sg-fork-modal-title", textContent: "Selective Export (Outline & Bookmarks)" }),
+        sgSkillEl("div", { className: "sg-fork-modal-subtitle", textContent: `${sourceTitle} · ${turns.length} turn(s), ${bookmarkedTurns.length} bookmarked` })
+      ]),
+      closeBtn
+    ]),
+    sgSkillEl("div", { className: "sg-fork-modal-body" }, [
+      sgSkillEl("div", { className: "sg-selexp-row" }, [
+        sgSkillEl("span", { className: "sg-selexp-label", textContent: "Scope:" }),
+        makeModeBtn("all", `All Turns (${turns.length})`),
+        makeModeBtn("bookmarked", `★ Bookmarked (${bookmarkedTurns.length})`, bookmarkedTurns.length === 0),
+        makeModeBtn("custom", "Custom")
+      ]),
+      sgSkillEl("div", { className: "sg-selexp-quick-bar" }, [
+        makeQuickBtn("Select All", () => {
+          selMode = "custom";
+          selectedTurns.clear();
+          turns.forEach(t => selectedTurns.add(t.turnNumber));
+          renderChecklist();
+        }),
+        makeQuickBtn("Clear", () => {
+          selMode = "custom";
+          selectedTurns.clear();
+          renderChecklist();
+        }),
+        makeQuickBtn(`Only Bookmarked (${bookmarkedTurns.length})`, () => {
+          selMode = "custom";
+          selectedTurns.clear();
+          bookmarkedTurns.forEach(t => selectedTurns.add(t.turnNumber));
+          renderChecklist();
+        }, bookmarkedTurns.length === 0),
+        makeQuickBtn(`Only Diagrams (${diagramTurns.length})`, () => {
+          selMode = "custom";
+          selectedTurns.clear();
+          diagramTurns.forEach(t => selectedTurns.add(t.turnNumber));
+          renderChecklist();
+        }, diagramTurns.length === 0)
+      ]),
+      checklistEl,
+      sgSkillEl("div", { className: "sg-selexp-row" }, [
+        sgSkillEl("span", { className: "sg-selexp-label", textContent: "Format:" }),
+        makeFormatBtn("md", "Markdown (.md)"),
+        makeFormatBtn("pdf", "PDF (.pdf)"),
+        makeFormatBtn("docx", "DOCX (.docx)"),
+        makeFormatBtn("txt", "Text (.txt)")
+      ]),
+      sgSkillEl("div", { className: "sg-selexp-opts-row" }, [
+        makeOptCheck("Include User prompts", includeUserQueries, v => { includeUserQueries = v; }),
+        makeOptCheck("Include timestamps", includeTimestamps, v => { includeTimestamps = v; }),
+        makeOptCheck("Include Gemini thoughts", includeThoughts, v => { includeThoughts = v; }),
+        mdPropsRow
+      ])
+    ]),
+    sgSkillEl("div", { className: "sg-selexp-footer" }, [
+      summaryEl,
+      sgSkillEl("div", { className: "sg-selexp-footer-actions" }, [
+        sgSkillEl("button", {
+          type: "button",
+          className: "sg-selexp-secondary-btn",
+          onClick: () => sgCloseSelectiveExportModal()
+        }, "Cancel"),
+        exportBtn
+      ])
+    ])
+  ]);
+
+  const overlay = sgSkillEl("div", {
+    id: "sg-selective-export-overlay",
+    onClick: ev => {
+      if (ev.target === overlay) sgCloseSelectiveExportModal();
+    }
+  }, modal);
+
+  const escHandler = ev => {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      sgCloseSelectiveExportModal();
+    }
+  };
+  overlay._sgEscHandler = escHandler;
+  document.addEventListener("keydown", escHandler, true);
+  document.body.appendChild(overlay);
+  _sgSelectiveExportOverlay = overlay;
+  renderChecklist();
+}
+
 function sgOpenForkHandoffModalFromResponse(modelEl) {
   const turns = sgScanConversationTurns();
   const rid = modelEl && typeof sgGetTurnId === "function" ? sgGetTurnId(modelEl) : null;
@@ -23318,6 +24321,7 @@ function sgSetOutlineEnabled(enabled) {
   isConversationOutlineEnabled = Boolean(enabled);
   if (!isConversationOutlineEnabled) {
     if (_sgOutlineRoot) _sgOutlineRoot.style.display = "none";
+    sgCloseSelectiveExportModal();
   }
   if (!isConversationOutlineEnabled && !isForkHandoffEnabled) {
     sgDisconnectChatMutationObserver();
@@ -23359,6 +24363,7 @@ function initOutlineAndForkSystem() {
       if (saved && typeof saved === "object") {
         _sgOutlineUiState.expanded = Boolean(saved.expanded);
         _sgOutlineUiState.showHeadings = saved.showHeadings !== false;
+        _sgOutlineUiState.showAssets = saved.showAssets !== false;
         _sgOutlineUiState.bookmarkedOnly = Boolean(saved.bookmarkedOnly);
         sgRenderOutline(_sgOutlineTurnsSnapshot, true);
       }
@@ -24844,6 +25849,14 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
       commandId: "fork_handoff"
     },
     {
+      id: "cmd_selective_export",
+      title: "Selective Export (Outline / Bookmarks)",
+      subtitle: "Export chosen turns, bookmarked responses, or diagram turns to MD/PDF/DOCX/TXT",
+      searchText: "selective export outline bookmarks turns pdf docx markdown filter",
+      baseWeight: 22,
+      commandId: "selective_export"
+    },
+    {
       id: "cmd_toggle_outline",
       title: "Toggle Conversation Outline",
       subtitle: `Show/hide floating turn & heading outline (${state.outlineEnabled ? "ON" : "OFF"})`,
@@ -25314,6 +26327,13 @@ async function sgExecuteCommandPaletteEntry(entry) {
           if (typeof showToast === "function") showToast("Choose a conversation first", "info");
         } else if (typeof showExportPopup === "function") {
           showExportPopup();
+        }
+        break;
+      case "selective_export":
+        if (typeof isOnGemLanding === "function" && isOnGemLanding()) {
+          if (typeof showToast === "function") showToast("Choose a conversation first", "info");
+        } else if (typeof sgOpenSelectiveExportModal === "function") {
+          sgOpenSelectiveExportModal({});
         }
         break;
       case "open_chat_info":
@@ -26162,7 +27182,8 @@ function sgOrchDefaultConfig() {
   return {
     mode: "in_chat",
     maxAgents: SG_ORCH_DEFAULT_MAX_SUBAGENTS,
-    modelPolicy: "quota_saver"
+    modelPolicy: "quota_saver",
+    reviewPlan: false
   };
 }
 
@@ -26175,7 +27196,8 @@ function sgOrchNormalizeConfig(raw) {
     ? Math.min(SG_ORCH_MAX_SUBAGENTS_CAP, Math.max(2, Math.round(maxNum)))
     : SG_ORCH_DEFAULT_MAX_SUBAGENTS;
   const modelPolicy = raw.modelPolicy === "adaptive" ? "adaptive" : "quota_saver";
-  return { mode, maxAgents, modelPolicy };
+  const reviewPlan = Boolean(raw.reviewPlan);
+  return { mode, maxAgents, modelPolicy, reviewPlan };
 }
 
 function sgOrchLoadConfig() {
@@ -26286,30 +27308,83 @@ async function sgOrchLoadAvailableSkills() {
   }
 }
 
-function sgOrchMatchSkillForTask(skillIdOrAlias, taskText, skillsList) {
-  if (!Array.isArray(skillsList) || skillsList.length === 0) return null;
-  const spec = String(skillIdOrAlias || "").trim().replace(/^[@/]+|[/]+$/g, "").toLowerCase();
-  if (spec && spec !== "none" && spec !== "null" && spec !== "n/a") {
+function sgOrchMatchSkillsForTask(rawSkillSpec, taskText, skillsList) {
+  if (!Array.isArray(skillsList) || skillsList.length === 0) return [];
+
+  const matched = [];
+  const seenIds = new Set();
+  const pushSkill = sk => {
+    if (!sk || !sk.id || sk.enabled === false) return;
+    const low = String(sk.id).toLowerCase();
+    if (seenIds.has(low) || matched.length >= 3) return;
+    seenIds.add(low);
+    matched.push(sk);
+  };
+
+  const findByToken = token => {
+    const clean = String(token || "").trim().replace(/^[@/]+|[/]+$/g, "").toLowerCase();
+    if (!clean || clean === "none" || clean === "null" || clean === "n/a") return null;
     for (const sk of skillsList) {
-      if (String(sk.id || "").toLowerCase() === spec || String(sk.name || "").toLowerCase() === spec) {
+      if (!sk || !sk.id || sk.enabled === false) continue;
+      if (String(sk.id || "").toLowerCase() === clean || String(sk.name || "").toLowerCase() === clean) {
         return sk;
       }
       const aliases = Array.isArray(sk.aliases) ? sk.aliases : [];
-      if (aliases.some(a => String(a || "").replace(/^[/]+|[/]+$/g, "").toLowerCase() === spec)) {
+      if (aliases.some(a => String(a || "").replace(/^[/]+|[/]+$/g, "").toLowerCase() === clean)) {
         return sk;
       }
     }
-  }
-  const combined = String(taskText || "");
-  for (const sk of skillsList) {
-    const idTag = `@${sk.id}`;
-    if (combined.includes(idTag)) return sk;
-    const aliases = Array.isArray(sk.aliases) ? sk.aliases : [];
-    for (const al of aliases) {
-      if (al && combined.includes(al)) return sk;
+    return null;
+  };
+
+  const specStr = String(rawSkillSpec || "").trim();
+  const specLow = specStr.toLowerCase();
+  if (specStr && specLow !== "none" && specLow !== "null" && specLow !== "n/a") {
+    const chunks = specStr.split(/[,+|;\s]+/).map(s => s.trim()).filter(Boolean);
+    for (const chunk of chunks) {
+      const direct = findByToken(chunk);
+      if (direct) {
+        pushSkill(direct);
+        continue;
+      }
+      if (chunk.includes("/")) {
+        const subParts = chunk.split("/").map(s => s.trim()).filter(Boolean);
+        for (const sub of subParts) {
+          pushSkill(findByToken(sub));
+        }
+      }
     }
   }
-  return null;
+
+  if (matched.length > 0) return matched;
+
+  const combined = String(taskText || "");
+  if (!combined) return matched;
+  const hits = [];
+  for (const sk of skillsList) {
+    if (!sk || !sk.id || sk.enabled === false) continue;
+    let bestPos = -1;
+    const idTag = `@${sk.id}`;
+    const idPos = combined.indexOf(idTag);
+    if (idPos !== -1) bestPos = idPos;
+    const aliases = Array.isArray(sk.aliases) ? sk.aliases : [];
+    for (const al of aliases) {
+      if (!al) continue;
+      const alPos = combined.indexOf(al);
+      if (alPos !== -1 && (bestPos === -1 || alPos < bestPos)) {
+        bestPos = alPos;
+      }
+    }
+    if (bestPos !== -1) hits.push({ pos: bestPos, sk });
+  }
+  hits.sort((a, b) => a.pos - b.pos);
+  for (const h of hits) pushSkill(h.sk);
+  return matched;
+}
+
+function sgOrchMatchSkillForTask(skillIdOrAlias, taskText, skillsList) {
+  const arr = sgOrchMatchSkillsForTask(skillIdOrAlias, taskText, skillsList);
+  return arr[0] || null;
 }
 
 function sgOrchSummarizeSkillDescription(skill) {
@@ -26462,13 +27537,18 @@ function sgOrchResolveSkillReadiness(skillsList = [], cfg = null, overrideLedger
   }
 
   const EXCLUDED_PLANNER_SKILLS = new Set(["acknowledgment", "no-code-mode", "orchestrate-mode"]);
+  const CONSTRAINT_MODIFIER_SKILLS = new Set(["no-code-mode"]);
   const syncedSkills = [];
   const unloadedSkills = [];
   const allEligibleSkills = [];
+  const constraintModifiers = [];
 
   for (const s of allSkills) {
     if (!s || !s.id || s.enabled === false) continue;
     const idLower = String(s.id).toLowerCase();
+    if (CONSTRAINT_MODIFIER_SKILLS.has(idLower)) {
+      constraintModifiers.push(s);
+    }
     if (EXCLUDED_PLANNER_SKILLS.has(idLower)) continue;
     allEligibleSkills.push(s);
     const st = checkAccountSyncState(s);
@@ -26486,7 +27566,8 @@ function sgOrchResolveSkillReadiness(skillsList = [], cfg = null, overrideLedger
     orchestrateHash: orchHash,
     syncedSkills,
     unloadedSkills,
-    allEligibleSkills
+    allEligibleSkills,
+    constraintModifiers
   };
 }
 
@@ -26595,7 +27676,7 @@ function sgBuildOrchestratorPlannerPrompt(userPrompt, cfg, skillsList = [], conv
     : "5. Sub-agent model routing is managed automatically by the extension (Quota-Saver policy) — omit MODEL and THINKING fields.";
 
   const skillRule = skillsSection
-    ? "6. For SKILL, specify a single matching skill ID from the specialist skills list if directly relevant to that sub-agent's specialty, or `none`."
+    ? "6. For SKILL, specify a matching skill ID from the specialist skills list (optionally chained left-to-right with '+' for up to 3 skills, e.g. 'analyze-mode + no-code-mode' when an analysis/review sub-agent should suppress code output), or `none`."
     : "6. For SKILL, write `none`.";
 
   const templateBlockLines = [
@@ -26615,7 +27696,7 @@ function sgBuildOrchestratorPlannerPrompt(userPrompt, cfg, skillsList = [], conv
     );
   }
   templateBlockLines.push(
-    "SKILL: [skill-id or none]",
+    "SKILL: [skill-id or skill1 + skill2 or none]",
     "TASK:",
     "- Objective: [Specific specialist goal for this sub-agent]",
     "- Context & Constraints: [All necessary technical constraints, inputs, and assumptions from the user request]",
@@ -26775,9 +27856,12 @@ function sgParseOrchestratorPlan(rawPlanText, userPrompt, cfg, skillsList = []) 
   const tasks = capped.map((item, idx) => {
     const model = sgOrchNormalizeSubAgentModel(item.rawModel, config.modelPolicy);
     const thinkingLevel = sgOrchNormalizeThinkingLevel(item.rawThinking, config.modelPolicy);
-    const matchedSkill = sgOrchMatchSkillForTask(item.rawSkill, `${item.task}\n${userPrompt}`, skillsList);
-    const skillId = matchedSkill ? matchedSkill.id : null;
-    const skillInstruction = matchedSkill ? String(matchedSkill.instructions || matchedSkill.content || "").trim() : "";
+    const matchedSkills = sgOrchMatchSkillsForTask(item.rawSkill, `${item.task}\n${userPrompt}`, skillsList);
+    const skillIds = matchedSkills.map(s => s.id);
+    const skillId = skillIds[0] || null;
+    const skillInstruction = matchedSkills[0]
+      ? String(matchedSkills[0].instructions || matchedSkills[0].content || "").trim()
+      : "";
     const id = `agent_${idx + 1}`;
     const prompt = sgBuildSubAgentWorkerPrompt({
       id,
@@ -26786,7 +27870,8 @@ function sgParseOrchestratorPlan(rawPlanText, userPrompt, cfg, skillsList = []) 
       userPrompt,
       planSummary,
       skillId,
-      skillInstruction
+      skillInstruction,
+      skills: matchedSkills
     });
     return {
       id,
@@ -26794,6 +27879,7 @@ function sgParseOrchestratorPlan(rawPlanText, userPrompt, cfg, skillsList = []) 
       model,
       thinkingLevel,
       skillId,
+      skillIds,
       task: item.task,
       prompt
     };
@@ -26812,7 +27898,31 @@ function sgParseOrchestratorPlan(rawPlanText, userPrompt, cfg, skillsList = []) 
   };
 }
 
-function sgBuildSubAgentWorkerPrompt({ role, task, userPrompt, planSummary, skillId, skillInstruction }) {
+function sgRebuildSubAgentTaskPrompt(agentItem, runContext, skillsList) {
+  const list = Array.isArray(skillsList) ? skillsList : [];
+  const rawIds = Array.isArray(agentItem && agentItem.skillIds) && agentItem.skillIds.length > 0
+    ? agentItem.skillIds
+    : (agentItem && agentItem.skillId ? [agentItem.skillId] : []);
+  const byId = new Map(list.map(s => [String(s && s.id || "").toLowerCase(), s]));
+  const matchedSkills = [];
+  for (const sid of rawIds) {
+    const found = byId.get(String(sid || "").toLowerCase());
+    if (found && !matchedSkills.includes(found)) matchedSkills.push(found);
+  }
+  const primary = matchedSkills[0] || null;
+  const prompt = sgBuildSubAgentWorkerPrompt({
+    role: agentItem.role,
+    task: agentItem.task,
+    userPrompt: (runContext && runContext.userPrompt) || agentItem.task,
+    planSummary: (runContext && runContext.planSummary) || "",
+    skillId: primary ? primary.id : null,
+    skillInstruction: primary ? String(primary.instructions || primary.content || "").trim() : "",
+    skills: matchedSkills
+  });
+  return { prompt, skillIds: matchedSkills.map(s => s.id), skillId: primary ? primary.id : null };
+}
+
+function sgBuildSubAgentWorkerPrompt({ role, task, userPrompt, planSummary, skillId, skillInstruction, skills }) {
   const isVi = sgOrchIsVietnameseText(userPrompt || task);
   const parts = [
     `**SUB-AGENT EXECUTION ROLE: ${role}**`,
@@ -26821,9 +27931,32 @@ function sgBuildSubAgentWorkerPrompt({ role, task, userPrompt, planSummary, skil
   if (planSummary) {
     parts.push(`Orchestration Context: ${planSummary}`);
   }
-  if (skillId && skillInstruction) {
-    parts.push("", `APPLIED SPECIALIST SKILL (@${skillId}):`, sgOrchFence(skillInstruction));
+
+  let resolvedSkills = [];
+  if (Array.isArray(skills) && skills.length > 0) {
+    resolvedSkills = skills
+      .map(s => ({
+        id: s && s.id,
+        name: (s && (s.name || s.id)) || "",
+        body: String((s && (s.instructions || s.content)) || "").trim()
+      }))
+      .filter(s => s.id && s.body);
+  } else if (skillId && skillInstruction) {
+    resolvedSkills = [{ id: skillId, name: skillId, body: String(skillInstruction).trim() }];
   }
+
+  if (resolvedSkills.length === 1) {
+    parts.push("", `APPLIED SPECIALIST SKILL (@${resolvedSkills[0].id}):`, sgOrchFence(resolvedSkills[0].body));
+  } else if (resolvedSkills.length > 1) {
+    const chainLabel = resolvedSkills.map(s => `@${s.id}`).join(" -> ");
+    parts.push(
+      "",
+      `APPLIED SPECIALIST SKILLS (LEFT-TO-RIGHT PRECEDENCE: ${chainLabel}):`,
+      "Interpret and compose these skills left to right: the first skill sets your primary reasoning approach, and subsequent constraint modifiers (such as @no-code-mode or @simplify-mode) override conflicting output steps.",
+      ...resolvedSkills.map(s => `<skill id="${s.id}" name="${s.name}">\n${sgOrchFence(s.body)}\n</skill>`)
+    );
+  }
+
   parts.push(
     "",
     "ORIGINAL USER REQUEST (For Global Context):",
@@ -27312,7 +28445,9 @@ function sgOpenOrchestratorConfigPopover(anchorEl = null) {
       b.addEventListener("click", e => {
         e.preventDefault();
         e.stopPropagation();
-        const val = key === "maxAgents" ? Number(opt.value) : opt.value;
+        const val = key === "maxAgents"
+          ? Number(opt.value)
+          : (key === "reviewPlan" ? Boolean(opt.value) : opt.value);
         sgOrchSaveConfig({ [key]: val });
         btns.forEach(other => {
           const isMatch = other === b;
@@ -27342,6 +28477,11 @@ function sgOpenOrchestratorConfigPopover(anchorEl = null) {
   pop.appendChild(buildSegGroup("Sub-Agent Model Policy", "modelPolicy", [
     { value: "quota_saver", label: "Quota Saver (4 H)", title: "Force Sub-Agents onto 4 Hydrogen / Fast to preserve Pro & Ultra quota" },
     { value: "adaptive", label: "Adaptive (H / Ne)", title: "Allow Planner to assign 4 Hydrogen or 4 Neon per sub-agent task" }
+  ]));
+
+  pop.appendChild(buildSegGroup("Phase 1 → 2 Plan Review", "reviewPlan", [
+    { value: false, label: "Auto-Run", title: "Execute sub-agents immediately after Phase 1 planning" },
+    { value: true, label: "Pause & Edit Plan", title: "Review and customize models, skills, or tasks before launching workers" }
   ]));
 
   const footer = document.createElement("div");
@@ -27501,7 +28641,7 @@ function sgRenderOrchestratorLiveCard() {
     { id: "subagents", label: `2. Sub-Agents (${run.subAgents ? run.subAgents.length : "…"})` },
     { id: "synthesizing", label: "3. Synthesizer" }
   ];
-  const phaseOrder = { planning: 0, subagents: 1, synthesizing: 2, done: 3, error: -1, aborted: -1 };
+  const phaseOrder = { planning: 0, reviewing: 1, subagents: 1, synthesizing: 2, done: 3, error: -1, aborted: -1 };
   const curIdx = phaseOrder[run.phase] ?? 0;
 
   phases.forEach((p, idx) => {
@@ -27532,14 +28672,29 @@ function sgRenderOrchestratorLiveCard() {
     card.appendChild(summaryEl);
   }
 
+  const isReviewing = run.phase === "reviewing";
+  let runWorkersBtn = null;
+  const syncRunWorkersBtnState = () => {
+    if (!runWorkersBtn || !Array.isArray(run.subAgents)) return;
+    const enabledCount = run.subAgents.filter(a => a.enabled !== false).length;
+    runWorkersBtn.textContent = `Run Workers (${enabledCount})`;
+    runWorkersBtn.disabled = enabledCount === 0;
+  };
+
   // Sub-Agent Rows
   if (Array.isArray(run.subAgents) && run.subAgents.length > 0) {
     const list = document.createElement("div");
     list.className = "sg-orch-agents-list";
 
+    const reviewExcluded = new Set(["acknowledgment", "orchestrate-mode"]);
+    const reviewAvailableSkills = isReviewing && Array.isArray(run.availableSkills)
+      ? run.availableSkills.filter(s => s && s.id && s.enabled !== false && !reviewExcluded.has(String(s.id).toLowerCase()))
+      : [];
+
     run.subAgents.forEach((ag, idx) => {
+      const isEnabled = ag.enabled !== false;
       const item = document.createElement("div");
-      item.className = `sg-orch-agent-row status-${ag.status || "queued"}`;
+      item.className = `sg-orch-agent-row status-${ag.status || "queued"}${!isEnabled ? " is-disabled" : ""}`;
       item.setAttribute("data-sg-agent-id", ag.id);
 
       const topRow = document.createElement("div");
@@ -27547,6 +28702,18 @@ function sgRenderOrchestratorLiveCard() {
 
       const roleWrap = document.createElement("div");
       roleWrap.className = "sg-orch-agent-role-wrap";
+
+      let enableCb = null;
+      if (isReviewing) {
+        enableCb = document.createElement("input");
+        enableCb.type = "checkbox";
+        enableCb.className = "sg-orch-review-enable";
+        enableCb.checked = isEnabled;
+        enableCb.title = "Enable or skip this sub-agent";
+        enableCb.setAttribute("aria-label", `Enable sub-agent #${idx + 1}`);
+        roleWrap.appendChild(enableCb);
+      }
+
       const idxBadge = document.createElement("span");
       idxBadge.className = "sg-orch-agent-idx";
       idxBadge.textContent = `#${idx + 1}`;
@@ -27558,7 +28725,9 @@ function sgRenderOrchestratorLiveCard() {
 
       const statusBadge = document.createElement("span");
       statusBadge.className = "sg-orch-agent-status";
-      if (ag.status === "completed") {
+      if (isReviewing) {
+        statusBadge.textContent = isEnabled ? "Ready" : "Skipped";
+      } else if (ag.status === "completed") {
         statusBadge.textContent = `Done ✓ (${ag.chars || (ag.output ? ag.output.length : 0)} chars)`;
       } else if (ag.status === "streaming") {
         statusBadge.textContent = `Streaming (${ag.chars || 0} chars)…`;
@@ -27577,45 +28746,162 @@ function sgRenderOrchestratorLiveCard() {
         statusBadge.textContent = "Queued";
       }
 
+      if (enableCb) {
+        enableCb.addEventListener("change", () => {
+          ag.enabled = Boolean(enableCb.checked);
+          item.classList.toggle("is-disabled", !ag.enabled);
+          statusBadge.textContent = ag.enabled ? "Ready" : "Skipped";
+          syncRunWorkersBtnState();
+        });
+      }
+
       topRow.appendChild(roleWrap);
       topRow.appendChild(statusBadge);
       item.appendChild(topRow);
 
-      const metaRow = document.createElement("div");
-      metaRow.className = "sg-orch-agent-meta";
-      const modelChip = document.createElement("span");
-      modelChip.className = "sg-orch-meta-chip";
-      modelChip.textContent = sgOrchFormatModelBadge(ag.model, ag.thinkingLevel);
-      metaRow.appendChild(modelChip);
+      if (isReviewing) {
+        const controls = document.createElement("div");
+        controls.className = "sg-orch-review-controls";
 
-      if (ag.workerSlot) {
-        const workerChip = document.createElement("span");
-        workerChip.className = "sg-orch-meta-chip sg-orch-worker-chip";
-        workerChip.textContent = `Worker #${ag.workerSlot} · ${ag.reused ? "Warm Reused" : "Temp Chat"}`;
-        metaRow.appendChild(workerChip);
-      }
-
-      if (ag.skillId) {
-        const skillChip = document.createElement("span");
-        skillChip.className = "sg-orch-meta-chip sg-orch-skill-chip";
-        skillChip.textContent = `@${ag.skillId}`;
-        metaRow.appendChild(skillChip);
-      }
-      item.appendChild(metaRow);
-
-      const previewText = ag.output || ag.preview || ag.task || "";
-      if (previewText) {
-        topRow.style.cursor = "pointer";
-        topRow.title = "Click to toggle sub-agent details";
-        topRow.addEventListener("click", () => {
-          ag.expanded = !ag.expanded;
-          sgRenderOrchestratorLiveCard();
+        const modelSel = document.createElement("select");
+        modelSel.className = "sg-orch-review-select";
+        modelSel.setAttribute("aria-label", `Model for sub-agent #${idx + 1}`);
+        const modelChoices = [
+          { value: "hydrogen", label: "4 Hydrogen", unlocked: true },
+          { value: "neon", label: "4 Neon", unlocked: sgOrchIsModelUnlocked("neon") },
+          { value: "carbon", label: "4 Carbon", unlocked: sgOrchIsModelUnlocked("carbon") }
+        ];
+        for (const mc of modelChoices) {
+          const opt = document.createElement("option");
+          opt.value = mc.value;
+          opt.textContent = mc.unlocked ? mc.label : `${mc.label} (Locked)`;
+          opt.disabled = !mc.unlocked;
+          if (String(ag.model || "hydrogen").toLowerCase() === mc.value) opt.selected = true;
+          modelSel.appendChild(opt);
+        }
+        modelSel.addEventListener("change", () => {
+          ag.model = modelSel.value;
         });
-        if (ag.expanded) {
-          const drawer = document.createElement("div");
-          drawer.className = "sg-orch-agent-drawer";
-          drawer.textContent = ag.output || ag.preview || ag.task;
-          item.appendChild(drawer);
+        controls.appendChild(modelSel);
+
+        const thinkSel = document.createElement("select");
+        thinkSel.className = "sg-orch-review-select";
+        thinkSel.setAttribute("aria-label", `Thinking level for sub-agent #${idx + 1}`);
+        for (const tl of [
+          { value: "low", label: "Think: Low" },
+          { value: "medium", label: "Think: Medium" },
+          { value: "high", label: "Think: High" },
+          { value: "extra", label: "Think: Extra" }
+        ]) {
+          const opt = document.createElement("option");
+          opt.value = tl.value;
+          opt.textContent = tl.label;
+          if (String(ag.thinkingLevel || "low").toLowerCase() === tl.value) opt.selected = true;
+          thinkSel.appendChild(opt);
+        }
+        thinkSel.addEventListener("change", () => {
+          ag.thinkingLevel = thinkSel.value;
+        });
+        controls.appendChild(thinkSel);
+
+        const currentSkills = Array.isArray(ag.skillIds)
+          ? ag.skillIds.slice()
+          : (ag.skillId ? [ag.skillId] : []);
+
+        for (const sid of currentSkills) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "sg-orch-review-skill-chip";
+          chip.title = `Remove @${sid}`;
+          chip.textContent = `@${sid} ×`;
+          chip.addEventListener("click", ev => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const next = currentSkills.filter(s => s !== sid);
+            ag.skillIds = next;
+            ag.skillId = next[0] || null;
+            sgRenderOrchestratorLiveCard();
+          });
+          controls.appendChild(chip);
+        }
+
+        if (currentSkills.length < 3 && reviewAvailableSkills.length > 0) {
+          const skillSel = document.createElement("select");
+          skillSel.className = "sg-orch-review-select";
+          skillSel.setAttribute("aria-label", `Add skill to sub-agent #${idx + 1}`);
+          const ph = document.createElement("option");
+          ph.value = "";
+          ph.textContent = "+ Skill";
+          skillSel.appendChild(ph);
+          for (const sk of reviewAvailableSkills) {
+            if (currentSkills.includes(sk.id)) continue;
+            const opt = document.createElement("option");
+            opt.value = sk.id;
+            opt.textContent = `@${sk.id}`;
+            skillSel.appendChild(opt);
+          }
+          skillSel.addEventListener("change", () => {
+            const val = skillSel.value;
+            if (!val) return;
+            const next = currentSkills.includes(val) ? currentSkills : [...currentSkills, val].slice(0, 3);
+            ag.skillIds = next;
+            ag.skillId = next[0] || null;
+            sgRenderOrchestratorLiveCard();
+          });
+          controls.appendChild(skillSel);
+        }
+
+        item.appendChild(controls);
+
+        const taskInput = document.createElement("textarea");
+        taskInput.className = "sg-orch-review-task";
+        taskInput.rows = 3;
+        taskInput.value = ag.task || "";
+        taskInput.setAttribute("aria-label", `Task prompt for sub-agent #${idx + 1}`);
+        taskInput.addEventListener("input", () => {
+          ag.task = taskInput.value;
+        });
+        item.appendChild(taskInput);
+      } else {
+        const metaRow = document.createElement("div");
+        metaRow.className = "sg-orch-agent-meta";
+        const modelChip = document.createElement("span");
+        modelChip.className = "sg-orch-meta-chip";
+        modelChip.textContent = sgOrchFormatModelBadge(ag.model, ag.thinkingLevel);
+        metaRow.appendChild(modelChip);
+
+        if (ag.workerSlot) {
+          const workerChip = document.createElement("span");
+          workerChip.className = "sg-orch-meta-chip sg-orch-worker-chip";
+          workerChip.textContent = `Worker #${ag.workerSlot} · ${ag.reused ? "Warm Reused" : "Temp Chat"}`;
+          metaRow.appendChild(workerChip);
+        }
+
+        const displaySkills = Array.isArray(ag.skillIds) && ag.skillIds.length > 0
+          ? ag.skillIds
+          : (ag.skillId ? [ag.skillId] : []);
+        for (const sid of displaySkills) {
+          const skillChip = document.createElement("span");
+          skillChip.className = "sg-orch-meta-chip sg-orch-skill-chip";
+          skillChip.textContent = `@${sid}`;
+          metaRow.appendChild(skillChip);
+        }
+        item.appendChild(metaRow);
+
+        const previewText = ag.output || ag.preview || ag.task || "";
+        if (previewText) {
+          topRow.style.cursor = "pointer";
+          topRow.title = "Click to toggle sub-agent details";
+          topRow.addEventListener("click", () => {
+            ag.expanded = !ag.expanded;
+            sgRenderOrchestratorLiveCard();
+          });
+          if (ag.expanded) {
+            const drawer = document.createElement("div");
+            drawer.className = "sg-orch-agent-drawer";
+            drawer.textContent = ag.output || ag.preview || ag.task;
+            item.appendChild(drawer);
+          }
         }
       }
 
@@ -27624,6 +28910,55 @@ function sgRenderOrchestratorLiveCard() {
 
     card.appendChild(list);
   }
+
+  if (isReviewing) {
+    const reviewFooter = document.createElement("div");
+    reviewFooter.className = "sg-orch-review-footer";
+
+    const enabledCount = Array.isArray(run.subAgents)
+      ? run.subAgents.filter(a => a.enabled !== false).length
+      : 0;
+    runWorkersBtn = document.createElement("button");
+    runWorkersBtn.type = "button";
+    runWorkersBtn.className = "sg-orch-review-run-btn";
+    runWorkersBtn.textContent = `Run Workers (${enabledCount})`;
+    runWorkersBtn.disabled = enabledCount === 0;
+    runWorkersBtn.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof run._reviewResolver === "function") {
+        const resolve = run._reviewResolver;
+        run._reviewResolver = null;
+        resolve(true);
+      }
+    });
+
+    const cancelReviewBtn = document.createElement("button");
+    cancelReviewBtn.type = "button";
+    cancelReviewBtn.className = "sg-orch-card-abort-btn";
+    cancelReviewBtn.textContent = "Cancel";
+    cancelReviewBtn.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      sgAbortActiveOrchestration("Orchestration aborted by user.");
+    });
+
+    reviewFooter.appendChild(cancelReviewBtn);
+    reviewFooter.appendChild(runWorkersBtn);
+    card.appendChild(reviewFooter);
+  }
+}
+
+function sgWaitForOrchestratorPlanApproval(run) {
+  return new Promise(resolve => {
+    if (!run || run.aborted) {
+      resolve(false);
+      return;
+    }
+    run._reviewResolver = approved => {
+      resolve(Boolean(approved));
+    };
+  });
 }
 
 function sgHandleOrchestratorProgress(msg) {
@@ -27689,6 +29024,11 @@ function sgAbortActiveOrchestration(reasonText = "Orchestration aborted.") {
   run.phase = "aborted";
   run.statusText = reasonText;
   sgStopOrchestratorTimer();
+  if (typeof run._reviewResolver === "function") {
+    const resolve = run._reviewResolver;
+    run._reviewResolver = null;
+    resolve(false);
+  }
   if (Array.isArray(run.subAgents)) {
     run.subAgents.forEach(a => {
       if (a.status !== "completed") a.status = "aborted";
@@ -27751,6 +29091,7 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
       ? "Phase 1/3 · Warming Temporary-Chat Worker #1 for background planning…"
       : "Phase 1/3 · Decomposing task in Main Tab & pre-warming Worker Pool in parallel…",
     subAgents: [],
+    availableSkills: [],
     startedAt: Date.now(),
     timerId: null
   };
@@ -27758,6 +29099,16 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
   _sgOrchCardMinimized = false;
   run.timerId = setInterval(() => {
     if (_sgOrchestratorActiveRun === run && !["done", "error", "aborted"].includes(run.phase)) {
+      if (run.phase === "reviewing") {
+        const timerEl = _sgOrchCardEl && _sgOrchCardEl.querySelector(".sg-orch-card-timer");
+        if (timerEl) {
+          const elapsedSec = Math.max(0, Math.floor((Date.now() - (run.startedAt || Date.now())) / 1000));
+          const mins = String(Math.floor(elapsedSec / 60)).padStart(2, "0");
+          const secs = String(elapsedSec % 60).padStart(2, "0");
+          timerEl.textContent = `${mins}:${secs}`;
+        }
+        return;
+      }
       sgRenderOrchestratorLiveCard();
     }
   }, 1000);
@@ -27768,6 +29119,7 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
   try {
     const skillsList = await sgOrchLoadAvailableSkills();
     if (run.aborted) return false;
+    run.availableSkills = skillsList;
     const readiness = sgOrchResolveSkillReadiness(skillsList, cfg);
     run.injectorMode = readiness.orchestrateReady ? "compact" : "full";
     run.injectorSource = readiness.orchestrateSource;
@@ -27813,17 +29165,18 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
 
     // Phase 2: Parse Plan & Execute Sub-Agents in Warm Temporary-Chat Worker Pool
     const parsedPlan = sgParseOrchestratorPlan(rawPlanText, cleanPrompt, cfg, skillsList);
-    const targetConcurrency = Math.min(SG_ORCH_MAX_SUBAGENTS_CAP, Math.max(1, parsedPlan.tasks.length));
+    let targetConcurrency = Math.min(SG_ORCH_MAX_SUBAGENTS_CAP, Math.max(1, parsedPlan.tasks.length));
     run.planSummary = parsedPlan.planSummary;
-    run.phase = "subagents";
     run.subAgents = parsedPlan.tasks.map((t, idx) => ({
       id: t.id,
       role: t.role,
       model: t.model,
       thinkingLevel: t.thinkingLevel,
       skillId: t.skillId,
+      skillIds: Array.isArray(t.skillIds) ? t.skillIds.slice() : (t.skillId ? [t.skillId] : []),
       task: t.task,
       prompt: t.prompt,
+      enabled: true,
       workerSlot: (idx % targetConcurrency) + 1,
       reused: cfg.mode === "clean_1turn" && idx === 0,
       status: "queued",
@@ -27833,6 +29186,40 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
       output: "",
       expanded: false
     }));
+
+    if (cfg.reviewPlan) {
+      run.phase = "reviewing";
+      run.statusText = "Phase 1.5 · Review & edit sub-agent models, skills, or tasks before launching workers.";
+      sgRenderOrchestratorLiveCard();
+      const approved = await sgWaitForOrchestratorPlanApproval(run);
+      if (!approved || run.aborted) return false;
+      run.subAgents = run.subAgents.filter(a => a.enabled !== false);
+      if (run.subAgents.length === 0) {
+        throw new Error("All sub-agents were skipped in Plan Review.");
+      }
+    }
+
+    targetConcurrency = Math.min(SG_ORCH_MAX_SUBAGENTS_CAP, Math.max(1, run.subAgents.length));
+    const finalTasks = run.subAgents.map((ag, idx) => {
+      const rebuilt = sgRebuildSubAgentTaskPrompt(ag, run, skillsList);
+      ag.prompt = rebuilt.prompt;
+      ag.skillIds = rebuilt.skillIds;
+      ag.skillId = rebuilt.skillId;
+      ag.workerSlot = (idx % targetConcurrency) + 1;
+      ag.reused = cfg.mode === "clean_1turn" && idx === 0;
+      return {
+        id: ag.id,
+        role: ag.role,
+        model: ag.model,
+        thinkingLevel: ag.thinkingLevel,
+        skillId: ag.skillId,
+        skillIds: ag.skillIds,
+        task: ag.task,
+        prompt: ag.prompt
+      };
+    });
+
+    run.phase = "subagents";
     run.statusText = `Phase 2/3 · Running ${run.subAgents.length} Sub-Agents in parallel across ${targetConcurrency} Background Temp-Chat Worker${targetConcurrency > 1 ? "s" : ""}…`;
     sgRenderOrchestratorLiveCard();
 
@@ -27841,7 +29228,7 @@ async function sgStartOrchestration(rawUserPrompt, overrideCfg = null) {
       runId,
       maxConcurrency: targetConcurrency,
       keepPoolWarm: false,
-      tasks: parsedPlan.tasks
+      tasks: finalTasks
     });
     if (run.aborted) return false;
 
@@ -27923,6 +29310,7 @@ function sgTriggerOrchestratorFromUi() {
 
 function sgOrchCheckPrefixIntercept(e) {
   if (_sgOrchBypassSendIntercept || !isExtensionEnabled || !isOrchestratorEnabled) return false;
+  if (typeof sgGetPeriodicBlockedElement === "function" && sgGetPeriodicBlockedElement()) return false;
   if ((document.body && "true" === document.body.dataset.sgBgWorker) || (window.location && String(window.location.hash || "").includes("sg_orch_worker=1"))) return false;
   const raw = sgOrchReadComposerText();
   if (!/^\s*(?:\/orchestrate(?:-mode)?\/|\/oc\/|@orchestrate(?:-mode)?\b)\s*(.+)/is.test(raw)) return false;
@@ -27968,6 +29356,7 @@ function sgOrchOnCaptureClick(e) {
     '.send-button-container button, button[data-test-id="send-button"], button.send-button, .send-button button'
   );
   if (!sendBtn) return;
+  if (sendBtn.disabled || "true" === sendBtn.getAttribute("aria-disabled") || sendBtn.classList.contains("stop") || sendBtn.querySelector('[fonticon="stop"], [data-mat-icon-name="stop"]')) return;
   sgOrchCheckPrefixIntercept(e);
 }
 
@@ -30696,7 +32085,11 @@ const SG_DIAGRAM_ENGINE_MAP = Object.freeze({
   chart: "chart",
   chartjs: "chart",
   "chart-json": "chart",
-  wavedrom: "wavedrom"
+  wavedrom: "wavedrom",
+  netlist: "netlist",
+  netlistsvg: "netlist",
+  circuit: "netlist",
+  schematic: "netlist"
 });
 const SG_DIAGRAM_GENERIC_LABELS = new Set([
   "",
@@ -30728,7 +32121,8 @@ const SG_DIAGRAM_LABELS = Object.freeze({
   svg: "SVG",
   dot: "Graphviz",
   chart: "Chart.js",
-  wavedrom: "WaveDrom"
+  wavedrom: "WaveDrom",
+  netlist: "NetlistSVG"
 });
 
 let isDiagramRendererEnabled = true;
@@ -30898,6 +32292,50 @@ function sgSniffJsonDiagramEngine(sourceText) {
     parsed.reg.every((item) => item && typeof item === "object" && typeof item.bits === "number" && item.bits > 0)
   ) {
     return "wavedrom";
+  }
+
+  if (
+    Array.isArray(parsed.assign) &&
+    parsed.assign.length > 0 &&
+    parsed.assign.every((row) => Array.isArray(row) && row.length >= 2 && typeof row[0] === "string")
+  ) {
+    return "wavedrom";
+  }
+
+  if (
+    parsed.modules &&
+    typeof parsed.modules === "object" &&
+    !Array.isArray(parsed.modules)
+  ) {
+    const modValues = Object.values(parsed.modules);
+    const hasValidModule = modValues.some(
+      (mod) =>
+        mod &&
+        typeof mod === "object" &&
+        !Array.isArray(mod) &&
+        ((mod.cells && typeof mod.cells === "object" && !Array.isArray(mod.cells)) ||
+          (mod.ports && typeof mod.ports === "object" && !Array.isArray(mod.ports)))
+    );
+    if (hasValidModule) return "netlist";
+  }
+
+  if (
+    parsed.cells &&
+    typeof parsed.cells === "object" &&
+    !Array.isArray(parsed.cells)
+  ) {
+    const cellValues = Object.values(parsed.cells);
+    const hasValidCell = cellValues.some(
+      (cell) =>
+        cell &&
+        typeof cell === "object" &&
+        !Array.isArray(cell) &&
+        typeof cell.type === "string" &&
+        cell.connections &&
+        typeof cell.connections === "object" &&
+        !Array.isArray(cell.connections)
+    );
+    if (hasValidCell) return "netlist";
   }
 
   return null;

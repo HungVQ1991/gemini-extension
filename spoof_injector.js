@@ -3,6 +3,9 @@
     if (window.location && /#(?:.*&)?sg_(?:orch|bg)_worker=1\b/i.test(String(window.location.hash || ""))) return;
   } catch (e) {}
   try {
+    if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
+  } catch (e) {}
+  try {
     if ("dark" === localStorage.getItem("sg_last_theme")) {
       var e = document.createElement("style");
       e.id = "sg-anti-fouc", e.textContent = "html,body{background-color:#131314!important}", document.documentElement.appendChild(e);
@@ -32,6 +35,9 @@
   } catch (e) {}
 }(),
   function() {
+    try {
+      if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
+    } catch (e) {}
     var e = HTMLInputElement.prototype.click;
     HTMLInputElement.prototype.click = function() {
       if ("file" !== this.type || !document.body || !document.body.hasAttribute("data-sg-block-file-picker")) return e.apply(this, arguments);
@@ -41,6 +47,9 @@
   function() {
     try {
       if (window.location && /#(?:.*&)?sg_(?:orch|bg)_worker=1\b/i.test(String(window.location.hash || ""))) return;
+    } catch (e) {}
+    try {
+      if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
     } catch (e) {}
     var e = null;
 
@@ -71,6 +80,9 @@
   function() {
     try {
       if (window.location && /#(?:.*&)?sg_(?:orch|bg)_worker=1\b/i.test(String(window.location.hash || ""))) return;
+    } catch (e) {}
+    try {
+      if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
     } catch (e) {}
     try {
       var cwDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow");
@@ -220,7 +232,13 @@
       if (window.location && /#(?:.*&)?sg_(?:orch|bg)_worker=1\b/i.test(String(window.location.hash || ""))) return;
     } catch (e) {}
     try {
+      if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
+    } catch (e) {}
+    try {
       window.addEventListener("keydown", function(e) {
+        try {
+          if ("undefined" != typeof localStorage && "0" === localStorage.getItem("sg_ext_enabled")) return;
+        } catch (_e) {}
         if (!e || e.isComposing || e.keyCode === 229 || e.key === "Process") return;
         if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
         var keyLower = (e.key || "").toLowerCase();

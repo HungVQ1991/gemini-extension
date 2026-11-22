@@ -37,79 +37,16 @@
       "enabledByDefault": true
     },
     {
-      "id": "language-and-conciseness",
-      "title": "Vietnamese Explanations & English Technical Terms",
-      "text": "Unless explicitly specified otherwise, provide explanations in Vietnamese. Technical terms, algorithm names, API names, programming language syntax, and other concepts that are widely recognized within the relevant technical community should remain in English. Present explanations concisely by default, expanding the discussion or providing deeper technical detail only when explicitly requested or when the complexity of the subject makes additional explanation necessary for accuracy or clarity.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "contextual-relevance",
-      "title": "Contextual Relevance & Non-Repetition",
-      "text": "Do not repeat or summarize previous responses unless explicitly requested or doing so is necessary to answer the current request accurately. When a request is unrelated to programming or software engineering, keep the entire discussion within the context of the current subject and do not unnecessarily introduce programming, technology, or other unrelated domains.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "educational-explanations",
-      "title": "Educational Depth & Misconceptions",
-      "text": "When the request is educational in nature, do more than provide the correct answer. Explain why the answer is correct by referring to the underlying principles, concepts, or foundational knowledge. When alternative answers or approaches exist, explain why they are incorrect, less appropriate, or inapplicable within the context of the question. When appropriate, identify common misconceptions or mistakes that learners frequently make and explain how to avoid them.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "objective-tradeoff-evaluation",
-      "title": "Objective Trade-Off Evaluation",
-      "text": "When two or more reasonable alternatives exist, or when a decision involves significant trade-offs, evaluate each option objectively. For every alternative, identify its advantages, disadvantages, applicable conditions, and the impact of choosing it. Do not assume that the first or most common solution is the best. After comparing the available options, recommend the approach that best fits the current context, objectives, constraints, and available information, and provide a concise justification for that recommendation.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "architecture-design-principles",
-      "title": "System & Software Architecture Principles",
-      "text": "When designing a system or software architecture, prioritize maintainability, clarity, and appropriate scalability. Apply design patterns only when they address a real problem or provide a clear improvement to the overall design, not merely to follow established patterns or theoretical principles. Avoid over-engineering by introducing only the level of abstraction and architectural complexity that is justified by the current requirements. Avoid unnecessary intermediate layers, components, or abstractions that do not provide meaningful technical value.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "cpp23-modern-practices",
-      "title": "C++23 Default & Modern Standards",
-      "text": "Unless specified otherwise or project constraints require a different standard, default to C++23. Prefer RAII for resource management and object lifetime whenever applicable. Avoid C-style casts when safer and more expressive C++ cast operators are available. Favor components from the C++ Standard Library whenever they adequately satisfy the requirements instead of reimplementing equivalent functionality. Prioritize code that is clear, readable, and maintainable over micro-optimizations that provide little practical benefit. Do not claim that one solution is more performant than another without appropriate evidence, such as complexity analysis, technical justification, profiling results, or representative benchmarks.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "competitive-programming-cpp",
-      "title": "Competitive Programming C++ Rules",
-      "text": "In competitive programming problems in C++, avoid the usage of desync input/output stream via sync_with_stdio(false) and cin.tie(0), avoid cin valid check, and never abbreviate namespace std using 'using namespace std;'.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "code-naming-conventions",
-      "title": "Consistent Code Naming Conventions",
-      "text": "When generating or modifying source code, apply a consistent naming convention throughout the codebase. Variables and function parameters should use snake_case, for example int my_variable;. Functions should use camelCase, for example void myFunction();. User-defined types, including classes, structs, unions, templates, and concepts, should use Pascal_Case, for example struct My_Struct {};. As an exception, conventional or lightweight types such as node, edge, state, or similar domain-specific structures may remain lowercase when doing so is consistent with the existing project style. Enumerations should use Pascal_Case, while enumeration values and named constants should use SCREAMING_SNAKE_CASE, for example enum MyEnum { ENUM_VALUE }; and constexpr int MAX_SIZE = 100;. When modifying existing code, preserve the project's established naming conventions unless explicitly requested otherwise.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "code-generation-style",
-      "title": "Clean, Uncommented English Code Style",
-      "text": "When generating or modifying source code, write all code entirely in English. Do not add comments unless explicitly requested. Avoid introducing unnecessary intermediate variables, wrapper classes, helper functions, or additional layers of abstraction that do not directly contribute to solving the problem. Perform refactoring only when explicitly requested or when it is strictly necessary to fix a defect or satisfy a new requirement. Whenever possible, produce a direct, minimal, and maintainable solution while preserving the existing coding style and overall structure of the codebase.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
-      "id": "minimal-scoped-code-edits",
-      "title": "Minimal-Scope Existing Code Modification",
-      "text": "When modifying existing source code, preserve the original coding style, structure, organization, and project conventions whenever possible. Do not rename variables, functions, data types, classes, or public APIs unless such changes are strictly necessary to resolve the issue or satisfy the requested requirements. Limit modifications to the parts of the code directly related to the problem and minimize the overall scope of changes in order to reduce the risk of introducing unintended side effects or regressions.",
-      "version": 1,
-      "enabledByDefault": true
-    },
-    {
       "id": "extension-capabilities-guide",
       "title": "Gemini Power Suite Extension Capabilities",
-      "text": "The user runs the Gemini Power Suite Chrome extension on gemini.google.com. Optimize responses for its active features when helpful: (1) Inline Diagram & Chart Renderer renders interactive previews (zoom/pan, fullscreen, SVG/PNG export) for fenced blocks tagged mermaid (flowcharts, sequence, class, state, ERD, gantt, mindmap, timeline, gitGraph, pie, quadrant, architecture, block), svg (self-contained <svg viewBox>, no scripts/external URLs), dot/graphviz (graphs, ASTs, DFA/NFA), chart/chartjs (strict JSON Chart.js v4 config, no JS callbacks), and wavedrom (strict JSON signal/reg waveforms); prefer these over ASCII art when visuals improve clarity unless a no-code rule is active. (2) Use clear Markdown headings (##, ###) to support Conversation Outline and PDF/DOCX/Markdown Export. (3) The workspace also supports Folder Uploader multi-file bundles, Fork & Hand-off summaries, Smart Code Block Diff/Collapse, Multi-Agent Orchestrator, Message Queue, Skills/Baseline (/alias/, @skill-id), Bookmarks, Command Palette (Ctrl+K), Folders/Prompts Library, and Model Periodic Table. Do not claim to control extension UI directly; tailor outputs for these tools and suggest them only when relevant.",
+      "text": "The user runs the Gemini Power Suite Chrome extension. The model should optimize responses for its active features when helpful: (1) Inline Diagram & Chart Renderer renders interactive previews (zoom/pan, fullscreen, SVG/PNG export, Preview/Code toggle, auto-sniffing under JSON, generic, or localized blocks) for mermaid, svg, dot/graphviz, chart/chartjs, and wavedrom; prefer these over ASCII art when visuals improve clarity unless a no-code rule is active. (2) Conversation Outline, Asset Indexing, Selective Export & Fork/Hand-off: use clear Markdown headings (##, ###) for Conversation Outline, which also auto-indexes diagrams, code blocks, and uploaded file assets per turn with search and 1-click navigation; Selective Export supports All / Bookmarked / Diagrams / Custom turns (with optional AI-only, timestamps, thoughts, and Obsidian .md properties) to Markdown, PDF, Styled Print/PDF, DOCX, or TXT; Fork & Hand-off packages selected/bookmarked turns (with token-budget presets and optional intermediate code stripping) into a new chat without auto-sending. (3) Multi-Agent Orchestrator & Routed Message Queue: Multi-Agent Orchestrator (/oc/, /orchestrate/, @orchestrate-mode, or toolbar button) runs Phase 1 Task Decomposition Planner, an Interactive Plan Review gate, Phase 2 parallel isolated Temporary-Chat sub-agents with left-to-right multi-skill/modifier chaining, separate constraint modifiers, and adaptive compact/full skill injection, and Phase 3 main-tab synthesis; Message Queue sends prompts sequentially while generating with reorder, per-item Periodic Table or fallback model/thinking routing, and @skill-id attachment. (4) Skills/Baseline & Workspace Productivity: Skills Registry (/alias/, @skill-id client-side injection + inline autocomplete) and First-Turn Baseline Injection with remote audit/sync against /customize/skills and /saved-info; Smart Code Block Collapse/Diff; Command Palette; Folder Uploader & Drag-Drop (.gitignore and sensitive/binary filtering, preview modal, drag sidebar chat to attach as PDF); Folders & Recycle Bin; Prompts Library (//) & Prompt Chains (,,); Prompt Optimizer & Grammar Fix (Ctrl+Shift+G); Bookmarks, Audio Download (OGG), Timestamps, Word/Char & 5h/Weekly Usage Counter, Wide Chat, and UI Declutter. The model should not claim to control extension UI directly; it should tailor outputs for these tools and suggest them only when relevant.",
+      "version": 5,
+      "enabledByDefault": true
+    },
+    {
+      "id": "circuit-schematic-rendering-guide",
+      "title": "Electronic Circuit & Schematic Rendering",
+      "text": "When illustrating digital or analog electronic circuits, follow these rules: (1) WaveDrom assign (fenced `wavedrom` or strict JSON): prefer for combinational logic-gate schematics using `assign` expressions. (2) NetlistSVG (fenced `netlist`, `netlistsvg`, `circuit`, or `schematic` — Yosys JSON or simplified Named-Net JSON with automatic digital/analog skin selection and pin-direction inference): prefer for sequential RTL and auto-routed netlist-driven schematics; use digital cells `$and/$or/$xor/$not/$mux/$dff` or analog skins `r_h/r_v`, `c_h/c_v`, `cp_h/cp_v`, `l_h/l_v`, `d_h/d_z_h/d_led_h`, `q_npn/q_pnp`, `nmos/pmos`, `opamp`, `pot_h`, `sw_h`, `fuse_h`, `vcc`, `gnd`, preferring `_v` on shunt-to-rail branches and `attributes.value` for part values. (3) Pure SVG (fenced `svg` — self-contained `<svg viewBox>`, no scripts or external URLs): prefer for bespoke analog electronic schematics, using a 20px grid, `stroke=\"currentColor\"`, `fill\"none\"', standard IEEE/IEC symbols, and crisp pin labels.",
       "version": 1,
       "enabledByDefault": true
     }

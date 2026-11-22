@@ -1006,6 +1006,9 @@ async function tryFetchChatViaRpc(e, t) {
   } catch (e) {}
   return null
 }
+function isAllowedGeminiTabUrl(url) {
+  return /^https:\/\/gemini\.google\.com(?:\/|$)/i.test(String(url || ""));
+}
 async function handleScrapeChatContent(e, t) {
   const {
     chatUrl: n,
@@ -1020,6 +1023,14 @@ async function handleScrapeChatContent(e, t) {
   };
   let s = null;
   try {
+    if (!isAllowedGeminiTabUrl(n)) {
+      return {
+        success: !1,
+        error: "Invalid Gemini chat URL",
+        title: o,
+        id: r
+      };
+    }
     s = (await chrome.tabs.create({
       url: n,
       active: !1
@@ -1121,6 +1132,7 @@ async function handleScrapeChatBatch(e, t) {
         });
         let n = null;
         try {
+          if (!isAllowedGeminiTabUrl(e.chatUrl)) throw new Error("Invalid Gemini chat URL");
           if (n = (await chrome.tabs.create({
               url: e.chatUrl,
               active: !1
@@ -1775,15 +1787,23 @@ function openSidebarIfClosed() {
 }
 
 function clickTemporaryChatButton() {
+  const isTempActive = () => {
+    if (document.querySelector("chat-window.is-temporary-chat")) return !0;
+    const btn = document.querySelector('temp-chat-button button, [data-test-id="temp-chat-button-container"] button, button[jslog^="274589"], [data-test-id="temp-chat-button"], ms-incognito-mode-toggle button');
+    if (!btn) return !1;
+    const host = btn.closest("temp-chat-button") || btn;
+    return host.classList.contains("temp-chat-on") || btn.classList.contains("temp-chat-on") || btn.classList.contains("ms-button-active") || btn.classList.contains("active") || "true" === btn.getAttribute("aria-pressed") || !!host.querySelector('mat-icon[fonticon="close"]');
+  };
+  if (isTempActive()) return !0;
   const e = document.querySelector('temp-chat-button button, [data-test-id="temp-chat-button-container"] button, button[jslog^="274589"], [data-test-id="temp-chat-button"], button.temp-chat-button');
   if (e) return e.click(), !0;
   const t = document.querySelectorAll('button, [role="button"]');
   for (const e of t) {
     const t = (e.textContent || "").toLowerCase().trim(),
       n = (e.getAttribute("aria-label") || "").toLowerCase();
-    if (t.includes("temporary") || n.includes("temporary")) return e.click(), !0
+    if (t.includes("temporary") || n.includes("temporary") || t.includes("tạm thời") || n.includes("tạm thời")) return e.click(), !0
   }
-  const n = document.querySelectorAll('[class*="temporary"], [data-temporary], a[href*="temp"]');
+  const n = document.querySelectorAll('button[class*="temporary"], [role="button"][class*="temporary"], [data-temporary], a[href*="temp"]');
   for (const e of n) return e.click(), !0;
   return !1
 }
@@ -1795,13 +1815,13 @@ function clickFastModeButton() {
   if (t.length > 0) {
     for (const e of t) {
       const t = (e.textContent || "").toLowerCase().trim();
-      if (t.startsWith("fast") || t.includes("gemini fast")) return "true" === e.getAttribute("aria-checked") ? "ALREADY_SELECTED" : (e.click(), "CLICKED")
+      if (t.startsWith("fast") || t.includes("gemini fast") || t.includes("hydrogen") || t.includes("trợ giúp hằng ngày")) return "true" === e.getAttribute("aria-checked") ? "ALREADY_SELECTED" : (e.click(), "CLICKED")
     }
     const e = t[0];
     return e ? "true" === e.getAttribute("aria-checked") ? "ALREADY_SELECTED" : (e.click(), "CLICKED") : "NOT_FOUND"
   }
   const n = (e.textContent || "").toLowerCase();
-  if ((n.includes("fast") || n.includes("thinking") || n.includes("pro")) && n.includes("fast")) return "ALREADY_SELECTED";
+  if ((n.includes("fast") || n.includes("thinking") || n.includes("pro") || n.includes("hydrogen") || n.includes("neon") || n.includes("carbon")) && (n.includes("fast") || n.includes("hydrogen"))) return "ALREADY_SELECTED";
   return (e.querySelector("button.input-area-switch") || e.querySelector("button") || e).click(), "MENU_OPENED"
 }
 
@@ -1810,45 +1830,74 @@ function clickOptimizationModeButton(e) {
   if (!t) return "NOT_FOUND";
   const n = {
       flash: {
-        patterns: ["fast", "gemini fast", "flash-lite", "flash lite"],
+        patterns: ["flash-lite", "flash lite", "hydrogen", "trợ giúp hằng ngày", "everyday", "daily", "gemini fast", "fast"],
         index: 0
       },
       thinking: {
-        patterns: ["thinking", "gemini thinking", "flash"],
+        patterns: ["neon", "phân tích sâu hơn", "deeper analysis", "deep analysis", "gemini thinking", "thinking", "flash"],
         index: 1
       },
       pro: {
-        patterns: ["pro", "gemini pro"],
+        patterns: ["carbon", "lập trình và xử lý công việc phức tạp", "coding and complex", "complex work", "gemini pro", "pro"],
         index: 2
       }
     },
     r = n[e] || n.flash,
-    o = document.querySelectorAll('[data-test-id^="bard-mode-option-"]');
+    matchesPattern = (txt, pat) => {
+      if ("pro" === pat) return /\bpro\b/.test(txt);
+      if ("flash" === pat) return /\bflash\b(?!\s*-?\s*lite)/.test(txt);
+      return txt.includes(pat);
+    },
+    isLockedItem = item => {
+      if (!item) return !0;
+      const tid = (item.getAttribute("data-test-id") || "").toLowerCase();
+      if (tid.includes("upsell")) return !0;
+      if ("true" === item.getAttribute("aria-disabled") || item.hasAttribute("disabled")) return !0;
+      if (item.querySelector('mat-icon[fonticon="lock"], mat-icon[data-mat-icon-name="lock"], .lock-icon')) return !0;
+      return !1;
+    },
+    isAutoText = txt => /\btự động\b|\bautomatic\b|\bauto\b/.test(txt),
+    isSelectedItem = item => "true" === item.getAttribute("aria-checked") || item.classList.contains("selected") || item.classList.contains("is-selected"),
+    o = Array.from(document.querySelectorAll('[data-test-id^="bard-mode-option-"]'));
   if (o.length > 0) {
-    for (const e of o) {
-      const t = (e.textContent || "").toLowerCase().trim();
-      if (r.patterns.some(e => t.startsWith(e) || t.includes(e))) return "true" === e.getAttribute("aria-checked") ? "ALREADY_SELECTED" : (e.click(), "CLICKED")
+    for (const pat of r.patterns) {
+      for (const opt of o) {
+        if (isLockedItem(opt)) continue;
+        const txt = (opt.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+        if (matchesPattern(txt, pat)) return isSelectedItem(opt) ? "ALREADY_SELECTED" : (opt.click(), "CLICKED");
+      }
     }
-    const e = o[r.index];
-    return e ? "true" === e.getAttribute("aria-checked") ? "ALREADY_SELECTED" : (e.click(), "CLICKED") : "NOT_FOUND"
+    const nonAutoUnlocked = o.filter(opt => !isLockedItem(opt) && !isAutoText((opt.textContent || "").toLowerCase().replace(/\s+/g, " ").trim()));
+    const fallbackOpt = nonAutoUnlocked[r.index] || nonAutoUnlocked[0] || o[r.index];
+    return fallbackOpt ? (isSelectedItem(fallbackOpt) ? "ALREADY_SELECTED" : (fallbackOpt.click(), "CLICKED")) : "NOT_FOUND";
   }
-  const a = (t.textContent || "").toLowerCase();
-  if (a.includes("fast") || a.includes("thinking") || a.includes("pro")) {
-    if (r.patterns.some(e => a.includes(e))) return "ALREADY_SELECTED"
+  const a = (t.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!isAutoText(a) && /(fast|thinking|pro|flash|hydrogen|neon|carbon|trợ giúp hằng ngày|phân tích sâu hơn|lập trình)/.test(a)) {
+    if (r.patterns.some(pat => matchesPattern(a, pat))) return "ALREADY_SELECTED";
   }
   return (t.querySelector("button.input-area-switch") || t.querySelector("button") || t).click(), "MENU_OPENED"
 }
 
 function setThinkingLevelInTab(e) {
-  const t = (e || "").toLowerCase();
-  if ("standard" !== t && "extended" !== t) return "NOT_FOUND";
+  const t = String(e || "").toLowerCase().trim();
+  const THINK_MATCHERS = {
+    minimal: ["minimal", "tối thiểu", "low", "thấp", "standard", "tiêu chuẩn"],
+    low: ["low", "thấp", "standard", "tiêu chuẩn"],
+    standard: ["standard", "tiêu chuẩn", "low", "thấp"],
+    medium: ["medium", "trung bình", "vừa"],
+    high: ["high", "cao", "extended", "mở rộng"],
+    extended: ["extended", "mở rộng", "high", "cao"],
+    extra: ["extra", "max", "siêu", "tối đa", "high", "cao"]
+  };
+  const patterns = THINK_MATCHERS[t];
+  if (!patterns) return "NOT_FOUND";
   const n = document.querySelector('[data-test-id="bard-mode-menu-button"]');
   if (!n) return "NOT_FOUND";
   const r = () => {
       const e = document.querySelector('gem-menu-item[value="thinking_level"]');
       if (e) return e;
       const t = Array.from(document.querySelectorAll("gem-menu-item")).find(e => "true" === e.getAttribute("aria-haspopup"));
-      return t || Array.from(document.querySelectorAll("gem-menu-item")).find(e => /^thinking level\b/i.test((e.textContent || "").trim().replace(/\s+/g, " ")))
+      return t || Array.from(document.querySelectorAll("gem-menu-item")).find(e => /^(?:thinking level|mức độ suy luận)\b/i.test((e.textContent || "").trim().replace(/\s+/g, " ")))
     },
     o = (() => {
       const e = r(),
@@ -1860,19 +1909,31 @@ function setThinkingLevelInTab(e) {
           if (t.length >= 2) return t
         }
       }
-      const n = Array.from(document.querySelectorAll("gem-menu-item:not([data-test-id]):not([value]):not([aria-controls])"));
-      return n.length >= 2 ? n : Array.from(document.querySelectorAll("gem-menu-item")).filter(e => {
-        const t = (e.textContent || "").trim().toLowerCase();
-        return /^(standard|extended)\b/.test(t) && !/^thinking level\b/.test(t)
+      const n = Array.from(document.querySelectorAll("gem-menu-item:not([data-test-id]):not([value]):not([aria-controls])"))
+        .filter(item => "true" !== item.getAttribute("aria-haspopup"));
+      return n.length >= 2 ? n : Array.from(document.querySelectorAll("gem-menu-item")).filter(item => {
+        if (item.hasAttribute("data-test-id") || "true" === item.getAttribute("aria-haspopup") || "thinking_level" === item.getAttribute("value")) return !1;
+        const txt = (item.textContent || "").trim().toLowerCase();
+        return /\b(standard|extended|low|medium|high|extra|minimal|max|tiêu chuẩn|mở rộng|thấp|trung bình|vừa|cao|tối thiểu|tối đa)\b/i.test(txt);
       })
     })();
   if (o.length >= 2) {
-    let e = o["extended" === t ? 1 : 0];
-    if (!e || !new RegExp("^" + t + "\\b").test((e.textContent || "").trim().toLowerCase())) {
-      const n = o.find(e => new RegExp("^" + t + "\\b").test((e.textContent || "").trim().toLowerCase()));
-      n && (e = n)
+    let target = null;
+    for (const pat of patterns) {
+      target = o.find(item => {
+        if (item.disabled || "true" === item.getAttribute("aria-disabled")) return !1;
+        const txt = (item.textContent || "").trim().toLowerCase().replace(/\s+/g, " ");
+        return txt.includes(pat);
+      });
+      if (target) break;
     }
-    return e ? e.classList.contains("selected") ? "ALREADY_SELECTED" : (e.click(), "CLICKED") : "NOT_FOUND"
+    if (!target) {
+      const wantHigh = "high" === t || "extended" === t || "extra" === t;
+      target = o[wantHigh ? o.length - 1 : 0];
+    }
+    if (!target) return "NOT_FOUND";
+    const isSel = target.classList.contains("selected") || target.classList.contains("active") || "true" === target.getAttribute("aria-checked") || !!target.querySelector(".selected, .active");
+    return isSel ? "ALREADY_SELECTED" : (target.click(), "CLICKED");
   }
   const a = r();
   if (!a) {
@@ -1892,7 +1953,7 @@ function getCurrentModeName() {
     if (t) {
       return t.textContent.trim()
     }
-    const n = e.textContent.trim().match(/(Flash-Lite|Flash|Fast|Thinking|Pro|Deep Think)/i);
+    const n = e.textContent.trim().match(/(Hydrogen|Neon|Carbon|Flash-Lite|Flash|Fast|Thinking|Pro|Deep Think)/i);
     if (n) return n[1]
   }
   return null
@@ -2125,9 +2186,48 @@ function spoofFocus() {
 
 const SG_ORCH_MAX_WARM_WORKERS = 4;
 const SG_ORCH_MAX_SUBAGENTS = 4;
+const SG_ORCH_WARM_IDLE_TTL_MS = 10 * 60 * 1000;
 const SG_ORCH_WORKER_WINDOWS_SESSION_KEY = "sgActiveOrchWorkerWindows";
 const _sgOrchWarmPools = new Map();
 const _activeOrchWorkerWindowIds = new Set();
+
+function sgClearOrchPoolIdleTimer(pool) {
+  if (pool && pool.idleTimer) {
+    clearTimeout(pool.idleTimer);
+    pool.idleTimer = null;
+  }
+}
+
+function sgScheduleOrchPoolIdleTimer(pool) {
+  if (!pool || pool.aborted) return;
+  sgClearOrchPoolIdleTimer(pool);
+  const runId = pool.runId;
+  const srcTabId = pool.srcTabId;
+  pool.idleTimer = setTimeout(() => {
+    pool.idleTimer = null;
+    sgDestroyOrchWarmPool(srcTabId, runId).catch(() => {});
+  }, SG_ORCH_WARM_IDLE_TTL_MS);
+}
+
+async function sgCleanupOrphanedOrchWorkersOnBoot() {
+  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session || "function" != typeof chrome.storage.session.get) return;
+  if (_sgOrchWarmPools.size > 0) return;
+  try {
+    const leftoverWins = await sgDrainTrackedOrchWorkerWindows();
+    if (Array.isArray(leftoverWins) && leftoverWins.length > 0 && chrome.windows && "function" == typeof chrome.windows.remove) {
+      for (const wid of leftoverWins) {
+        try { await chrome.windows.remove(wid); } catch (_e) {}
+      }
+    }
+    const leftoverTabs = await sgDrainTrackedTempTabs("orch");
+    if (Array.isArray(leftoverTabs) && leftoverTabs.length > 0 && chrome.tabs && "function" == typeof chrome.tabs.remove) {
+      for (const tid of leftoverTabs) {
+        try { await chrome.tabs.remove(tid); } catch (_e) {}
+      }
+    }
+  } catch (_e) {}
+}
+sgCleanupOrphanedOrchWorkersOnBoot().catch(() => {});
 
 function sgTrackOrchWorkerWindow(winId) {
   if ("number" != typeof winId) return Promise.resolve();
@@ -2216,6 +2316,7 @@ async function sgDestroyOrchWarmPool(srcTabId, onlyRunId = null) {
   if (!pool) return;
   if (onlyRunId && pool.runId && pool.runId !== onlyRunId) return;
   pool.aborted = !0;
+  sgClearOrchPoolIdleTimer(pool);
   _sgOrchWarmPools.delete(srcTabId);
   if (pool.workerWindowPromise) {
     try { await pool.workerWindowPromise; } catch (_e) {}
@@ -2246,6 +2347,7 @@ function sgGetOrCreateOrchPool(srcTab, runId) {
   const accountUrl = geminiAppUrlForTab(srcTab);
   let pool = _sgOrchWarmPools.get(srcTabId);
   if (pool && pool.accountUrl === accountUrl && !pool.aborted) {
+    sgClearOrchPoolIdleTimer(pool);
     if (runId) pool.runId = runId;
     pool.srcTabIndex = srcTab.index;
     pool.srcWindowId = srcTab.windowId;
@@ -2263,6 +2365,7 @@ function sgGetOrCreateOrchPool(srcTab, runId) {
     aborted: !1,
     workerWindowId: null,
     workerWindowPromise: null,
+    idleTimer: null,
     workers: new Array(SG_ORCH_MAX_WARM_WORKERS).fill(null)
   };
   _sgOrchWarmPools.set(srcTabId, pool);
@@ -3349,6 +3452,7 @@ async function handleOrchestratorPrewarm(msg, sender) {
   if (!srcTabId) return { success: !1, error: "No source tab ID" };
   const srcTab = await chrome.tabs.get(srcTabId);
   const pool = sgGetOrCreateOrchPool(srcTab, msg.runId);
+  sgScheduleOrchPoolIdleTimer(pool);
   const count = Math.min(SG_ORCH_MAX_WARM_WORKERS, Math.max(1, Number(msg.workerCount) || 1));
   for (let slot = 0; slot < count; slot++) {
     sgAcquireOrchWarmWorker(pool, slot).catch(() => {});
@@ -3365,6 +3469,7 @@ async function handleOrchestratorRunSubagents(msg, sender) {
   if (!srcTabId) throw new Error("No source tab ID provided for orchestrator");
   const srcTab = await chrome.tabs.get(srcTabId);
   const pool = sgGetOrCreateOrchPool(srcTab, msg.runId);
+  sgClearOrchPoolIdleTimer(pool);
   const rawTasks = Array.isArray(msg.tasks) ? msg.tasks.slice(0, SG_ORCH_MAX_SUBAGENTS) : [];
   if (0 === rawTasks.length) {
     return { success: !1, error: "No sub-agent tasks provided", results: [] };
@@ -3455,6 +3560,8 @@ async function handleOrchestratorRunSubagents(msg, sender) {
     const wasAborted = pool.aborted;
     if (!msg.keepPoolWarm || wasAborted) {
       await sgDestroyOrchWarmPool(srcTabId, pool.runId);
+    } else {
+      sgScheduleOrchPoolIdleTimer(pool);
     }
     return {
       success: !wasAborted && results.some(r => r && r.success),

@@ -200,8 +200,22 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.storage.sync.set({ extensionEnabled: enabled });
     updateSettingsState(enabled);
     chrome.tabs.query({ url: "*://gemini.google.com/*" }, tabs => {
-      tabs.forEach(tab => {
-        chrome.tabs.reload(tab.id).catch(() => {});
+      (tabs || []).forEach(tab => {
+        const reloadTab = () => {
+          try {
+            Promise.resolve(chrome.tabs.reload(tab.id)).catch(() => {});
+          } catch (_e) {}
+        };
+        try {
+          const p = chrome.tabs.sendMessage(tab.id, { type: "SG_SYNC_MASTER_STATE", enabled });
+          if (p && typeof p.then === "function") {
+            p.then(reloadTab, reloadTab);
+          } else {
+            reloadTab();
+          }
+        } catch (_e) {
+          reloadTab();
+        }
       });
     });
   }

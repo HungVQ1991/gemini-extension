@@ -119,7 +119,8 @@ body {
   border-color: transparent;
 }
 
-body.sg-sb-dark .sg-engine-wavedrom svg {
+body.sg-sb-dark .sg-engine-wavedrom svg,
+body.sg-sb-dark .sg-engine-netlist svg {
   filter: invert(0.92) hue-rotate(180deg);
 }
 

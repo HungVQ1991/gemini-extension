@@ -66,8 +66,187 @@
     mermaid: ["lib/diagrams/mermaid.min.js"],
     dot: ["lib/diagrams/viz-standalone.js"],
     chart: ["lib/diagrams/chart.umd.min.js"],
-    wavedrom: ["lib/diagrams/wavedrom.min.js"]
+    wavedrom: ["lib/diagrams/wavedrom.min.js"],
+    netlist: ["lib/diagrams/elk.bundled.js", "lib/diagrams/netlistsvg.min.js"]
   });
+
+  const NETLIST_ANALOG_TYPES = new Set([
+    "vcc", "vee", "gnd",
+    "resistor_h", "r_h", "resistor_v", "r_v",
+    "capacitor_h", "c_h", "capacitor_v", "c_v",
+    "capacitor_pol_h", "cp_h", "c_pol_h", "capacitor_pol_v", "cp_v", "c_pol_v",
+    "inductor_h", "l_h", "inductor_v", "l_v",
+    "voltage_source", "v", "current_source", "i",
+    "diode_h", "d_h", "diode_v", "d_v",
+    "diode_schottky_h", "d_sk_h", "diode_schottky_v", "d_sk_v",
+    "diode_led_h", "d_led_h", "diode_led_v", "d_led_v",
+    "diode_zener_h", "d_z_h", "zener_h", "diode_zener_v", "d_z_v", "zener_v",
+    "transistor_npn", "q_npn", "transistor_pnp", "q_pnp",
+    "mosfet_n", "nmos", "q_nmos", "mosfet_p", "pmos", "q_pmos",
+    "potentiometer_h", "pot_h", "potentiometer_v", "pot_v",
+    "switch_h", "sw_h", "switch_v", "sw_v",
+    "fuse_h", "f_h", "fuse_v", "f_v",
+    "opamp", "op", "xtal", "transformer_1p_1s"
+  ]);
+  const NETLIST_NONPOLAR_TWOPIN_TYPES = new Set([
+    "resistor_h", "r_h", "resistor_v", "r_v",
+    "capacitor_h", "c_h", "capacitor_v", "c_v",
+    "inductor_h", "l_h", "inductor_v", "l_v",
+    "switch_h", "sw_h", "switch_v", "sw_v",
+    "fuse_h", "f_h", "fuse_v", "f_v",
+    "xtal"
+  ]);
+  const NETLIST_POLARIZED_TWOPIN_TYPES = new Set([
+    "voltage_source", "v", "current_source", "i",
+    "diode_h", "d_h", "diode_v", "d_v",
+    "diode_schottky_h", "d_sk_h", "diode_schottky_v", "d_sk_v",
+    "diode_led_h", "d_led_h", "diode_led_v", "d_led_v",
+    "diode_zener_h", "d_z_h", "zener_h", "diode_zener_v", "d_z_v", "zener_v",
+    "capacitor_pol_h", "cp_h", "c_pol_h", "capacitor_pol_v", "cp_v", "c_pol_v"
+  ]);
+  const NETLIST_TWO_PIN_ANALOG_TYPES = new Set([
+    ...NETLIST_NONPOLAR_TWOPIN_TYPES,
+    ...NETLIST_POLARIZED_TWOPIN_TYPES
+  ]);
+  const NETLIST_ORIENTABLE_ALIAS_MAP = Object.freeze({
+    resistor: ["r_h", "r_v"],
+    r: ["r_h", "r_v"],
+    res: ["r_h", "r_v"],
+    capacitor: ["c_h", "c_v"],
+    c: ["c_h", "c_v"],
+    cap: ["c_h", "c_v"],
+    capacitor_pol: ["cp_h", "cp_v"],
+    cap_pol: ["cp_h", "cp_v"],
+    c_pol: ["cp_h", "cp_v"],
+    cp: ["cp_h", "cp_v"],
+    cap_polarized: ["cp_h", "cp_v"],
+    electrolytic: ["cp_h", "cp_v"],
+    electrolytic_capacitor: ["cp_h", "cp_v"],
+    polarized_capacitor: ["cp_h", "cp_v"],
+    inductor: ["l_h", "l_v"],
+    l: ["l_h", "l_v"],
+    ind: ["l_h", "l_v"],
+    coil: ["l_h", "l_v"],
+    diode: ["d_h", "d_v"],
+    d: ["d_h", "d_v"],
+    diode_schottky: ["d_sk_h", "d_sk_v"],
+    schottky: ["d_sk_h", "d_sk_v"],
+    schottky_diode: ["d_sk_h", "d_sk_v"],
+    d_sk: ["d_sk_h", "d_sk_v"],
+    diode_led: ["d_led_h", "d_led_v"],
+    led: ["d_led_h", "d_led_v"],
+    d_led: ["d_led_h", "d_led_v"],
+    diode_zener: ["d_z_h", "d_z_v"],
+    zener: ["d_z_h", "d_z_v"],
+    zener_diode: ["d_z_h", "d_z_v"],
+    d_z: ["d_z_h", "d_z_v"],
+    potentiometer: ["pot_h", "pot_v"],
+    pot: ["pot_h", "pot_v"],
+    variable_resistor: ["pot_h", "pot_v"],
+    var_resistor: ["pot_h", "pot_v"],
+    trimmer: ["pot_h", "pot_v"],
+    switch: ["sw_h", "sw_v"],
+    sw: ["sw_h", "sw_v"],
+    spst: ["sw_h", "sw_v"],
+    fuse: ["f_h", "f_v"],
+    f: ["f_h", "f_v"]
+  });
+  const NETLIST_STATIC_ALIAS_MAP = Object.freeze({
+    vcc: "vcc",
+    power: "vcc",
+    vdd: "vcc",
+    supply: "vcc",
+    pwr: "vcc",
+    vee: "vee",
+    vss: "vee",
+    neg_supply: "vee",
+    gnd: "gnd",
+    ground: "gnd",
+    earth: "gnd",
+    gnd_sym: "gnd",
+    dgnd: "gnd",
+    agnd: "gnd",
+    pgnd: "gnd",
+    voltage: "v",
+    voltage_source: "v",
+    vsource: "v",
+    v_source: "v",
+    battery: "v",
+    bat: "v",
+    dc_source: "v",
+    ac_source: "v",
+    vs: "v",
+    current: "i",
+    current_source: "i",
+    isource: "i",
+    i_source: "i",
+    is: "i",
+    npn: "q_npn",
+    bjt_npn: "q_npn",
+    npn_transistor: "q_npn",
+    pnp: "q_pnp",
+    bjt_pnp: "q_pnp",
+    pnp_transistor: "q_pnp",
+    nmos: "nmos",
+    mosfet_n: "mosfet_n",
+    n_mosfet: "nmos",
+    nmosfet: "nmos",
+    nfet: "nmos",
+    q_nmos: "q_nmos",
+    pmos: "pmos",
+    mosfet_p: "mosfet_p",
+    p_mosfet: "pmos",
+    pmosfet: "pmos",
+    pfet: "pmos",
+    q_pmos: "q_pmos",
+    opamp: "opamp",
+    op: "op",
+    op_amp: "opamp",
+    amplifier: "opamp",
+    xtal: "xtal",
+    crystal: "xtal",
+    oscillator: "xtal",
+    quartz: "xtal",
+    transformer_1p_1s: "transformer_1p_1s",
+    transformer: "transformer_1p_1s",
+    xfmr: "transformer_1p_1s",
+    trafo: "transformer_1p_1s"
+  });
+  const NETLIST_ANALOG_PIN_MAPS = Object.freeze({
+    twopin_ab: Object.freeze({
+      a: "A", "1": "A", in: "A", left: "A", top: "A", p: "A", pos: "A", "+": "A", p1: "A", t1: "A", pin1: "A", n1: "A",
+      b: "B", "2": "B", out: "B", right: "B", bottom: "B", n: "B", neg: "B", "-": "B", p2: "B", t2: "B", pin2: "B", n2: "B"
+    }),
+    twopin_pm: Object.freeze({
+      "+": "+", pos: "+", positive: "+", p: "+", anode: "+", a: "+", "1": "+", in: "+", plus: "+", top: "+", left: "+",
+      "-": "-", neg: "-", negative: "-", n: "-", cathode: "-", k: "-", c: "-", b: "-", "2": "-", out: "-", minus: "-", bottom: "-", right: "-"
+    }),
+    pot: Object.freeze({
+      a: "A", "1": "A", in: "A", left: "A", top: "A",
+      b: "B", "2": "B", out: "B", right: "B", bottom: "B",
+      w: "W", "3": "W", wiper: "W", tap: "W", mid: "W", out_w: "W", slider: "W"
+    }),
+    bjt: Object.freeze({
+      b: "B", base: "B",
+      c: "C", collector: "C", col: "C",
+      e: "E", emitter: "E", emit: "E"
+    }),
+    mosfet: Object.freeze({
+      g: "G", gate: "G",
+      d: "D", drain: "D",
+      s: "S", source: "S", src: "S"
+    }),
+    opamp: Object.freeze({
+      "+": "+", "in+": "+", inp: "+", noninv: "+", non_inv: "+", vp: "+", in_p: "+", noninverting: "+",
+      "-": "-", "in-": "-", inn: "-", inv: "-", vn: "-", in_n: "-", inverting: "-",
+      out: "OUT", y: "OUT", vo: "OUT", output: "OUT", vout: "OUT",
+      vcc: "VCC", "v+": "VCC", vdd: "VCC", "vs+": "VCC", vpwr: "VCC",
+      vee: "VEE", "v-": "VEE", vss: "VEE", "vs-": "VEE", vnwr: "VEE", gnd: "VEE"
+    })
+  });
+  const NETLIST_GND_NAME_RE = /^(?:gnd|ground|vss|vee|agnd|dgnd|pgnd|0v|com|return)(?:_.*)?$/i;
+  const NETLIST_VCC_NAME_RE = /^(?:vcc|vdd|avdd|dvdd|vin_pwr|vbat|\+?\d+(?:\.\d+)?v(?:dc)?|3v3|5v|12v)(?:_.*)?$/i;
+  const NETLIST_OUTPUT_PINS = new Set(["Y", "Q", "OUT", "Z", "O", "COUT", "SUM"]);
 
   const _scriptLoadCache = new Map();
   let _vizInstancePromise = null;
@@ -571,8 +750,515 @@
       }
       const svgEl = parseAndSanitizeSvg(svgStr, false);
       return { kind: "svg", element: svgEl };
+    },
+
+    async netlist(source) {
+      await loadEngineScript("netlist");
+      const nsvg = window.netlistsvg;
+      if (!nsvg || typeof nsvg.render !== "function") {
+        throw new Error("NetlistSVG library failed to initialize");
+      }
+      const raw = safeJsonParse(source);
+      const { netlist, skin } = normalizeNetlistPayload(raw);
+      const skinXml = skin === "analog" ? nsvg.analogSkin : nsvg.digitalSkin;
+      const svgStr = await nsvg.render(skinXml, netlist);
+      if (!svgStr || !svgStr.includes("<svg")) {
+        throw new Error("NetlistSVG produced empty SVG");
+      }
+      const svgEl = parseAndSanitizeSvg(svgStr, false);
+      return { kind: "svg", element: svgEl };
     }
   };
+
+  function collectRawNetTokens(rawVal, outSet = new Set()) {
+    if (typeof rawVal === "number" && Number.isInteger(rawVal)) {
+      outSet.add(`num:${rawVal}`);
+      return outSet;
+    }
+    if (typeof rawVal === "string") {
+      const s = rawVal.trim().toLowerCase();
+      if (s) outSet.add(`str:${s}`);
+      return outSet;
+    }
+    if (Array.isArray(rawVal)) {
+      for (const item of rawVal) {
+        if (typeof item === "number" && Number.isInteger(item)) {
+          outSet.add(`num:${item}`);
+        } else if (typeof item === "string") {
+          const s = item.trim().toLowerCase();
+          if (s) outSet.add(`str:${s}`);
+        }
+      }
+    }
+    return outSet;
+  }
+
+  function tokensIntersectSet(tokens, targetSet) {
+    for (const t of tokens) {
+      if (targetSet.has(t)) return true;
+    }
+    return false;
+  }
+
+  function addNamedRailTokens(rawVal, gndRailTokens, vccRailTokens) {
+    const tokens = collectRawNetTokens(rawVal);
+    for (const tok of tokens) {
+      if (!tok.startsWith("str:")) continue;
+      const name = tok.slice(4);
+      if (NETLIST_GND_NAME_RE.test(name)) gndRailTokens.add(tok);
+      if (NETLIST_VCC_NAME_RE.test(name)) vccRailTokens.add(tok);
+    }
+  }
+
+  function collectModuleRailTokens(mod) {
+    const gndRailTokens = new Set();
+    const vccRailTokens = new Set();
+
+    if (mod.ports && typeof mod.ports === "object" && !Array.isArray(mod.ports)) {
+      for (const pKey of Object.keys(mod.ports)) {
+        if (FORBIDDEN_JSON_KEYS.has(pKey)) continue;
+        const port = mod.ports[pKey];
+        if (!port || typeof port !== "object" || Array.isArray(port)) continue;
+        const rawBits = port.bits !== undefined ? port.bits : port.net !== undefined ? port.net : pKey;
+        addNamedRailTokens(rawBits, gndRailTokens, vccRailTokens);
+      }
+    }
+
+    if (mod.cells && typeof mod.cells === "object" && !Array.isArray(mod.cells)) {
+      for (const cKey of Object.keys(mod.cells)) {
+        if (FORBIDDEN_JSON_KEYS.has(cKey)) continue;
+        const cell = mod.cells[cKey];
+        if (!cell || typeof cell !== "object" || Array.isArray(cell)) continue;
+        const rawTypeNorm = typeof cell.type === "string"
+          ? cell.type.trim().toLowerCase().replace(/[\s-]+/g, "_")
+          : "";
+        const staticAlias = NETLIST_STATIC_ALIAS_MAP[rawTypeNorm];
+        const rawConns = cell.connections && typeof cell.connections === "object" && !Array.isArray(cell.connections)
+          ? cell.connections
+          : null;
+        if (!rawConns) continue;
+
+        for (const pin of Object.keys(rawConns)) {
+          if (FORBIDDEN_JSON_KEYS.has(pin)) continue;
+          const val = rawConns[pin];
+          addNamedRailTokens(val, gndRailTokens, vccRailTokens);
+          if (staticAlias === "gnd" || staticAlias === "vee") {
+            collectRawNetTokens(val, gndRailTokens);
+          } else if (staticAlias === "vcc") {
+            collectRawNetTokens(val, vccRailTokens);
+          }
+        }
+      }
+    }
+
+    return { gndRailTokens, vccRailTokens };
+  }
+
+  function resolveNetlistCellType(rawType, rawConns, gndRailTokens, vccRailTokens) {
+    const raw = typeof rawType === "string" && rawType.trim() ? rawType.trim() : "generic";
+    const normKey = raw.toLowerCase().replace(/[\s-]+/g, "_");
+
+    if (NETLIST_ANALOG_TYPES.has(normKey)) {
+      return normKey;
+    }
+
+    const orientedMatch = normKey.match(/^(.+)_([hv])$/);
+    if (orientedMatch && Object.prototype.hasOwnProperty.call(NETLIST_ORIENTABLE_ALIAS_MAP, orientedMatch[1])) {
+      const pair = NETLIST_ORIENTABLE_ALIAS_MAP[orientedMatch[1]];
+      return pair[orientedMatch[2] === "v" ? 1 : 0];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(NETLIST_STATIC_ALIAS_MAP, normKey)) {
+      return NETLIST_STATIC_ALIAS_MAP[normKey];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(NETLIST_ORIENTABLE_ALIAS_MAP, normKey)) {
+      const pair = NETLIST_ORIENTABLE_ALIAS_MAP[normKey];
+      let touchesRail = false;
+      if (rawConns && typeof rawConns === "object") {
+        for (const pin of Object.keys(rawConns)) {
+          if (FORBIDDEN_JSON_KEYS.has(pin)) continue;
+          const toks = collectRawNetTokens(rawConns[pin]);
+          if (tokensIntersectSet(toks, gndRailTokens) || tokensIntersectSet(toks, vccRailTokens)) {
+            touchesRail = true;
+            break;
+          }
+        }
+      }
+      return touchesRail ? pair[1] : pair[0];
+    }
+
+    return raw;
+  }
+
+  function getAnalogPinFamily(cellTypeLower) {
+    if (cellTypeLower === "vcc" || cellTypeLower === "vee" || cellTypeLower === "gnd") return "rail";
+    if (NETLIST_NONPOLAR_TWOPIN_TYPES.has(cellTypeLower)) return "twopin_ab";
+    if (NETLIST_POLARIZED_TWOPIN_TYPES.has(cellTypeLower)) return "twopin_pm";
+    if (/^(?:pot|potentiometer)_[hv]$/.test(cellTypeLower)) return "pot";
+    if (/^(?:q_npn|q_pnp|transistor_npn|transistor_pnp)$/.test(cellTypeLower)) return "bjt";
+    if (/^(?:nmos|q_nmos|mosfet_n|pmos|q_pmos|mosfet_p)$/.test(cellTypeLower)) return "mosfet";
+    if (cellTypeLower === "opamp" || cellTypeLower === "op") return "opamp";
+    return null;
+  }
+
+  function inferNetlistPinDirection(cellTypeLower, pinName) {
+    if (cellTypeLower === "vcc") return "output";
+    if (cellTypeLower === "gnd" || cellTypeLower === "vee") return "input";
+    const pinUpper = String(pinName || "").trim().toUpperCase();
+    if (
+      cellTypeLower === "q_npn" ||
+      cellTypeLower === "q_pnp" ||
+      cellTypeLower === "transistor_npn" ||
+      cellTypeLower === "transistor_pnp"
+    ) {
+      return pinUpper === "E" ? "output" : "input";
+    }
+    if (cellTypeLower === "nmos" || cellTypeLower === "q_nmos" || cellTypeLower === "mosfet_n") {
+      return pinUpper === "S" ? "output" : "input";
+    }
+    if (cellTypeLower === "pmos" || cellTypeLower === "q_pmos" || cellTypeLower === "mosfet_p") {
+      return pinUpper === "D" ? "output" : "input";
+    }
+    if (/^(?:pot|potentiometer)_[hv]$/.test(cellTypeLower)) {
+      return pinUpper === "B" || pinUpper === "W" ? "output" : "input";
+    }
+    if (cellTypeLower === "opamp" || cellTypeLower === "op") {
+      return pinUpper === "OUT" || pinUpper === "Y" ? "output" : "input";
+    }
+    if (cellTypeLower === "transformer_1p_1s") {
+      return pinUpper === "L2.1" || pinUpper === "L2.2" ? "output" : "input";
+    }
+    if (NETLIST_TWO_PIN_ANALOG_TYPES.has(cellTypeLower)) {
+      if (pinUpper === "B" || pinUpper === "-") return "output";
+      return "input";
+    }
+    if (NETLIST_OUTPUT_PINS.has(pinUpper) || /^OUT\d*$/.test(pinUpper)) {
+      return "output";
+    }
+    return "input";
+  }
+
+  function normalizeCellPinsAndDirections(cellTypeLower, isAnalogCell, rawConns, existingDirs, resolveBits, gndRailTokens, vccRailTokens) {
+    const family = isAnalogCell ? getAnalogPinFamily(cellTypeLower) : null;
+    const pinMap = family && family !== "rail" ? NETLIST_ANALOG_PIN_MAPS[family] : null;
+    const origPins = Object.keys(rawConns).filter((p) => !FORBIDDEN_JSON_KEYS.has(p));
+
+    const renameMap = new Map();
+    const usedTargets = new Set();
+
+    if (family === "rail" && origPins.length === 1) {
+      renameMap.set(origPins[0], "A");
+      usedTargets.add("A");
+    } else if (pinMap) {
+      for (const origPin of origPins) {
+        const mapped = pinMap[origPin.trim().toLowerCase()];
+        if (mapped && !usedTargets.has(mapped)) {
+          renameMap.set(origPin, mapped);
+          usedTargets.add(mapped);
+        }
+      }
+      for (const origPin of origPins) {
+        if (renameMap.has(origPin)) continue;
+        if (!usedTargets.has(origPin)) {
+          renameMap.set(origPin, origPin);
+          usedTargets.add(origPin);
+        }
+      }
+      if (family === "twopin_ab" && origPins.length === 2 && !(usedTargets.has("A") && usedTargets.has("B"))) {
+        for (const origPin of origPins) {
+          const curTarget = renameMap.get(origPin);
+          if (curTarget === "A" || curTarget === "B") continue;
+          const fallbackTarget = !usedTargets.has("A") ? "A" : !usedTargets.has("B") ? "B" : curTarget;
+          if (fallbackTarget !== curTarget) {
+            usedTargets.delete(curTarget);
+            usedTargets.add(fallbackTarget);
+            renameMap.set(origPin, fallbackTarget);
+          }
+        }
+      }
+    } else {
+      for (const origPin of origPins) {
+        renameMap.set(origPin, origPin);
+      }
+    }
+
+    const normConns = {};
+    const rawByTargetPin = {};
+    for (const origPin of origPins) {
+      const targetPin = renameMap.get(origPin) || origPin;
+      if (FORBIDDEN_JSON_KEYS.has(targetPin)) continue;
+      rawByTargetPin[targetPin] = rawConns[origPin];
+      normConns[targetPin] = resolveBits(rawConns[origPin]);
+    }
+
+    let swappedAB = false;
+    if (NETLIST_NONPOLAR_TWOPIN_TYPES.has(cellTypeLower) && cellTypeLower.endsWith("_v")) {
+      if (normConns.A !== undefined && normConns.B !== undefined) {
+        const toksA = collectRawNetTokens(rawByTargetPin.A);
+        const toksB = collectRawNetTokens(rawByTargetPin.B);
+        const aIsGnd = tokensIntersectSet(toksA, gndRailTokens);
+        const bIsGnd = tokensIntersectSet(toksB, gndRailTokens);
+        const aIsVcc = tokensIntersectSet(toksA, vccRailTokens);
+        const bIsVcc = tokensIntersectSet(toksB, vccRailTokens);
+        if ((aIsGnd && !bIsGnd) || (bIsVcc && !aIsVcc)) {
+          const tmpBits = normConns.A;
+          normConns.A = normConns.B;
+          normConns.B = tmpBits;
+          swappedAB = true;
+        }
+      }
+    }
+
+    const normDirs = {};
+    if (!swappedAB) {
+      for (const origPin of Object.keys(existingDirs)) {
+        if (FORBIDDEN_JSON_KEYS.has(origPin)) continue;
+        const targetPin = renameMap.get(origPin) || origPin;
+        if (FORBIDDEN_JSON_KEYS.has(targetPin)) continue;
+        const d = String(existingDirs[origPin] || "").trim().toLowerCase();
+        if (d === "input" || d === "output" || (!isAnalogCell && d === "inout")) {
+          normDirs[targetPin] = d;
+        }
+      }
+    }
+    for (const pin of Object.keys(normConns)) {
+      if (!Object.prototype.hasOwnProperty.call(normDirs, pin)) {
+        normDirs[pin] = inferNetlistPinDirection(cellTypeLower, pin);
+      }
+    }
+
+    return { normConns, normDirs };
+  }
+
+  function normalizeCellAttributes(cell) {
+    const out = {};
+    let hasAny = false;
+    if (cell.attributes && typeof cell.attributes === "object" && !Array.isArray(cell.attributes)) {
+      for (const key of Object.keys(cell.attributes)) {
+        if (FORBIDDEN_JSON_KEYS.has(key)) continue;
+        const v = cell.attributes[key];
+        if (v === null || v === undefined) continue;
+        if ((key === "value" || key === "ref" || key === "name") && typeof v !== "string") {
+          out[key] = String(v);
+        } else {
+          out[key] = v;
+        }
+        hasAny = true;
+      }
+    }
+    if (!Object.prototype.hasOwnProperty.call(out, "value") && (typeof cell.value === "string" || typeof cell.value === "number")) {
+      const s = String(cell.value).trim();
+      if (s) {
+        out.value = s;
+        hasAny = true;
+      }
+    }
+    if (!Object.prototype.hasOwnProperty.call(out, "name") && (typeof cell.name === "string" || typeof cell.name === "number")) {
+      const s = String(cell.name).trim();
+      if (s) {
+        out.name = s;
+        hasAny = true;
+      }
+    }
+    return hasAny ? out : null;
+  }
+
+  function normalizeNetlistPayload(rawObj) {
+    if (!rawObj || typeof rawObj !== "object" || Array.isArray(rawObj)) {
+      throw new Error("Netlist payload must be a JSON object");
+    }
+
+    let sourceModules = null;
+    if (rawObj.modules && typeof rawObj.modules === "object" && !Array.isArray(rawObj.modules)) {
+      sourceModules = rawObj.modules;
+    } else if (rawObj.cells && typeof rawObj.cells === "object" && !Array.isArray(rawObj.cells)) {
+      const modName = typeof rawObj.name === "string" && rawObj.name.trim() ? rawObj.name.trim() : "circuit";
+      sourceModules = {
+        [modName]: {
+          ports: rawObj.ports && typeof rawObj.ports === "object" && !Array.isArray(rawObj.ports) ? rawObj.ports : {},
+          cells: rawObj.cells
+        }
+      };
+    } else {
+      throw new Error("Netlist JSON requires a 'modules' or 'cells' object");
+    }
+
+    let maxBitId = 1;
+    const scanBits = (val) => {
+      if (typeof val === "number" && Number.isInteger(val) && val > maxBitId) {
+        maxBitId = val;
+        return;
+      }
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === "number" && Number.isInteger(item) && item > maxBitId) {
+            maxBitId = item;
+          }
+        }
+      }
+    };
+
+    for (const modKey of Object.keys(sourceModules)) {
+      if (FORBIDDEN_JSON_KEYS.has(modKey)) continue;
+      const mod = sourceModules[modKey];
+      if (!mod || typeof mod !== "object" || Array.isArray(mod)) continue;
+      if (mod.ports && typeof mod.ports === "object" && !Array.isArray(mod.ports)) {
+        for (const pKey of Object.keys(mod.ports)) {
+          if (FORBIDDEN_JSON_KEYS.has(pKey)) continue;
+          const port = mod.ports[pKey];
+          if (port && typeof port === "object") scanBits(port.bits);
+        }
+      }
+      if (mod.cells && typeof mod.cells === "object" && !Array.isArray(mod.cells)) {
+        for (const cKey of Object.keys(mod.cells)) {
+          if (FORBIDDEN_JSON_KEYS.has(cKey)) continue;
+          const cell = mod.cells[cKey];
+          if (cell && typeof cell === "object" && cell.connections && typeof cell.connections === "object") {
+            for (const pin of Object.keys(cell.connections)) {
+              if (!FORBIDDEN_JSON_KEYS.has(pin)) scanBits(cell.connections[pin]);
+            }
+          }
+        }
+      }
+    }
+
+    let nextBitId = maxBitId;
+    const explicitSkin = String(rawObj.skin || "").trim().toLowerCase();
+    let sawAnalogCell = explicitSkin === "analog";
+    const normalizedModules = {};
+
+    for (const modKey of Object.keys(sourceModules)) {
+      if (FORBIDDEN_JSON_KEYS.has(modKey)) continue;
+      const mod = sourceModules[modKey];
+      if (!mod || typeof mod !== "object" || Array.isArray(mod)) continue;
+
+      const { gndRailTokens, vccRailTokens } = collectModuleRailTokens(mod);
+      const netMap = new Map();
+      const resolveBits = (rawBits, fallbackName) => {
+        const list = Array.isArray(rawBits)
+          ? rawBits
+          : rawBits !== undefined && rawBits !== null
+            ? [rawBits]
+            : fallbackName !== undefined
+              ? [fallbackName]
+              : [];
+        const out = [];
+        for (const item of list) {
+          if (typeof item === "number" && Number.isInteger(item)) {
+            out.push(item);
+          } else if (typeof item === "string") {
+            const s = item.trim();
+            if (!s) continue;
+            const lower = s.toLowerCase();
+            if (s === "0" || s === "1" || lower === "x" || lower === "z") {
+              out.push(lower);
+            } else {
+              if (!netMap.has(s)) {
+                nextBitId += 1;
+                netMap.set(s, nextBitId);
+              }
+              out.push(netMap.get(s));
+            }
+          }
+        }
+        return out;
+      };
+
+      const normPorts = {};
+      if (mod.ports && typeof mod.ports === "object" && !Array.isArray(mod.ports)) {
+        for (const pKey of Object.keys(mod.ports)) {
+          if (FORBIDDEN_JSON_KEYS.has(pKey)) continue;
+          const port = mod.ports[pKey];
+          if (!port || typeof port !== "object" || Array.isArray(port)) continue;
+          const dirRaw = String(port.direction || "input").trim().toLowerCase();
+          const direction = dirRaw === "output" || dirRaw === "out"
+            ? "output"
+            : dirRaw === "inout"
+              ? "inout"
+              : "input";
+          const rawBits = port.bits !== undefined ? port.bits : port.net !== undefined ? port.net : pKey;
+          normPorts[pKey] = {
+            direction,
+            bits: resolveBits(rawBits, pKey)
+          };
+        }
+      }
+
+      const normCells = {};
+      if (mod.cells && typeof mod.cells === "object" && !Array.isArray(mod.cells)) {
+        for (const cKey of Object.keys(mod.cells)) {
+          if (FORBIDDEN_JSON_KEYS.has(cKey)) continue;
+          const cell = mod.cells[cKey];
+          if (!cell || typeof cell !== "object" || Array.isArray(cell)) continue;
+
+          const rawConns = cell.connections && typeof cell.connections === "object" && !Array.isArray(cell.connections)
+            ? cell.connections
+            : {};
+          const cellType = resolveNetlistCellType(cell.type, rawConns, gndRailTokens, vccRailTokens);
+          const cellTypeLower = cellType.toLowerCase();
+          const isAnalogCell = NETLIST_ANALOG_TYPES.has(cellTypeLower);
+          if (isAnalogCell) {
+            sawAnalogCell = true;
+          }
+
+          const existingDirs = cell.port_directions && typeof cell.port_directions === "object" && !Array.isArray(cell.port_directions)
+            ? cell.port_directions
+            : {};
+          const { normConns, normDirs } = normalizeCellPinsAndDirections(
+            cellTypeLower,
+            isAnalogCell,
+            rawConns,
+            existingDirs,
+            resolveBits,
+            gndRailTokens,
+            vccRailTokens
+          );
+
+          const normCell = {
+            type: cellType,
+            port_directions: normDirs,
+            connections: normConns
+          };
+          const normAttrs = normalizeCellAttributes(cell);
+          if (normAttrs) {
+            normCell.attributes = normAttrs;
+          }
+          if (cell.parameters && typeof cell.parameters === "object" && !Array.isArray(cell.parameters)) {
+            normCell.parameters = cell.parameters;
+          }
+          if (cell.hide_name !== undefined) {
+            normCell.hide_name = cell.hide_name;
+          }
+          normCells[cKey] = normCell;
+        }
+      }
+
+      const normMod = {
+        ports: normPorts,
+        cells: normCells
+      };
+      if (mod.attributes && typeof mod.attributes === "object" && !Array.isArray(mod.attributes)) {
+        normMod.attributes = mod.attributes;
+      }
+      normalizedModules[modKey] = normMod;
+    }
+
+    if (Object.keys(normalizedModules).length === 0) {
+      throw new Error("Netlist JSON contains no valid modules");
+    }
+
+    const skin = explicitSkin === "digital"
+      ? "digital"
+      : explicitSkin === "analog" || sawAnalogCell
+        ? "analog"
+        : "digital";
+
+    return {
+      netlist: { modules: normalizedModules },
+      skin
+    };
+  }
 
   function reportHeight(desiredHeight) {
     const clamped = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.ceil(desiredHeight)));
@@ -678,7 +1364,7 @@
           ctx.fillStyle = isDark ? "#16171a" : "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.scale(scale, scale);
-          if (_currentEngine === "wavedrom" && isDark) {
+          if ((_currentEngine === "wavedrom" || _currentEngine === "netlist") && isDark) {
             ctx.filter = "invert(0.92) hue-rotate(180deg)";
           }
           ctx.drawImage(img, 0, 0, w, h);
@@ -836,6 +1522,7 @@
       parseAndSanitizeSvg,
       safeJsonParse,
       validateChartConfig,
+      normalizeNetlistPayload,
       isSafeHref,
       sanitizeCssText
     };
