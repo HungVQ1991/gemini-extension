@@ -315,6 +315,21 @@
                 </div>
             </div>
 
+            <!-- Keyboard Shortcuts Section -->
+            <div class="settings-section" id="shortcuts-settings">
+                <h3>Keyboard Shortcuts</h3>
+                <div class="toggle-row" data-tooltip="Press / outside text inputs to quickly focus the Gemini prompt composer.">
+                    <label for="focus-shortcut-toggle">Quick Focus Composer (/)</label>
+                    <label class="switch">
+                        <input type="checkbox" id="focus-shortcut-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item shortcuts-row" data-tooltip="Customize keyboard shortcuts and toggle individual keybinds.">
+                    <span>Keybinds (17)</span>
+                    <button type="button" id="open-keybinds-btn" class="action-btn">Customize</button>
+                </div>
+            </div>
 
             <p id="sg-popup-no-results" class="sg-popup-no-results" hidden>No matching settings</p>
         </div>
@@ -338,7 +353,24 @@
         </div>
     </div>
 
-
+    <!-- Keybinds Modal -->
+    <div id="keybinds-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content sg-keybinds-modal" role="dialog" aria-modal="true" aria-labelledby="keybinds-modal-title">
+            <div class="modal-header">
+                <h3 id="keybinds-modal-title">Keyboard Shortcuts</h3>
+                <button type="button" class="modal-close-btn" id="keybinds-close-btn" aria-label="Close keybinds modal">&times;</button>
+            </div>
+            <div class="sg-keybinds-toolbar">
+                <input type="search" id="keybinds-search" class="sg-keybinds-search" placeholder="Filter keybinds..." aria-label="Filter keybinds" autocomplete="off">
+                <div id="keybinds-status" class="sg-keybinds-status" role="status">Click a keybind button and press your desired key combination.</div>
+            </div>
+            <div class="modal-body sg-keybinds-body" id="keybinds-list"></div>
+            <div class="modal-footer sg-keybinds-footer">
+                <button type="button" id="keybinds-reset-all-btn" class="secondary-btn">Reset All</button>
+                <button type="button" id="keybinds-done-btn" class="primary-btn">Done</button>
+            </div>
+        </div>
+    </div>
 
     <script src="popup.js"></script>
 </body>

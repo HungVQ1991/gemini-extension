@@ -65,7 +65,10 @@ chrome.runtime.onInstalled.addListener(e => {
       timestampsEnabled: !1,
       settingsInMenuEnabled: !1,
       autohideCollapsedSidebar: !0,
-      autohideTopActions: !0
+      autohideTopActions: !0,
+      skillsInjectionEnabled: !1,
+      baselineInjectionEnabled: !1,
+      hideGemsSidebarButton: !0
     });
     chrome.storage.local.set({
       sgOnboardingEligible: !0
@@ -80,7 +83,13 @@ chrome.runtime.onInstalled.addListener(e => {
   }
 });
 chrome.runtime.onConnect.addListener(e => {
-  if ("sg-settings-popup" !== e.name) return;
+  if (e && "sg-orchestrator-keepalive" === e.name) {
+    try {
+      e.onMessage && e.onMessage.addListener(() => {});
+    } catch (_e) {}
+    return;
+  }
+  if (!e || "sg-settings-popup" !== e.name) return;
   const t = e => {
     chrome.tabs.query({
       url: "*://gemini.google.com/*"
@@ -1682,39 +1691,67 @@ async function handleFixGrammar(e, t) {
   }
 }
 async function waitForTabLoad(tabId) {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab && "complete" === tab.status) return;
-  } catch (err) {
-    throw new Error("Tab not found or closed: " + tabId);
-  }
-
   return new Promise((resolve, reject) => {
+    let settled = !1;
     let timer = null;
+    let pollTimer = null;
     const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (pollTimer && "function" == typeof clearInterval) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (_e) {}
+      try { chrome.tabs.onRemoved.removeListener(onRemoved); } catch (_e) {}
+    };
+    const finishResolve = () => {
+      if (settled) return;
+      settled = !0;
+      cleanup();
+      resolve();
+    };
+    const finishReject = err => {
+      if (settled) return;
+      settled = !0;
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
     };
     const onUpdated = (updatedId, changeInfo) => {
       if (updatedId === tabId && "complete" === changeInfo.status) {
-        cleanup();
-        resolve();
+        finishResolve();
       }
     };
     const onRemoved = removedId => {
       if (removedId === tabId) {
-        cleanup();
-        reject(new Error("Tab closed before load completed"));
+        finishReject(new Error("Tab closed before load completed"));
       }
     };
-    timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Tab load timeout"));
-    }, 3e4);
 
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onRemoved.addListener(onRemoved);
+
+    timer = setTimeout(() => {
+      finishReject(new Error("Tab load timeout"));
+    }, 3e4);
+
+    const checkTab = isInitial => {
+      if (settled) return;
+      Promise.resolve(chrome.tabs.get(tabId)).then(tab => {
+        if (!settled && tab && "complete" === tab.status) {
+          finishResolve();
+        }
+      }).catch(() => {
+        finishReject(new Error(isInitial ? ("Tab not found or closed: " + tabId) : "Tab closed before load completed"));
+      });
+    };
+
+    if ("function" == typeof setInterval) {
+      pollTimer = setInterval(() => checkTab(!1), 2000);
+    }
+    checkTab(!0);
   });
 }
 async function pollForResponse(e, t) {
@@ -1982,7 +2019,7 @@ async function _addModeHideClassInTab(e) {
         tabId: e
       },
       func: () => {
-        "function" == typeof window._sgEnsureModeMenuHideStyle && window._sgEnsureModeMenuHideStyle(), document.body.classList.add("sg-hiding-mode-menu")
+        "function" == typeof window._sgEnsureModeMenuHideStyle && window._sgEnsureModeMenuHideStyle(), document.body && document.body.classList.add("sg-hiding-mode-menu")
       }
     })
   } catch (e) {}
@@ -1994,7 +2031,7 @@ async function _removeModeHideClassInTab(e, t = 350) {
         tabId: e
       },
       func: e => {
-        setTimeout(() => document.body.classList.remove("sg-hiding-mode-menu"), e)
+        setTimeout(() => document.body && document.body.classList.remove("sg-hiding-mode-menu"), e)
       },
       args: [t]
     })
@@ -2176,6 +2213,55 @@ function spoofFocus() {
         });
       } catch (_e) {}
     }
+    if (!window.__sgWorkerRafShimInstalled && "function" == typeof window.requestAnimationFrame && "function" == typeof setTimeout) {
+      window.__sgWorkerRafShimInstalled = !0;
+      const origRAF = window.requestAnimationFrame;
+      const origCAF = "function" == typeof window.cancelAnimationFrame ? window.cancelAnimationFrame : null;
+      const hasMap = "function" == typeof Map;
+      const pending = hasMap ? new Map() : Object.create(null);
+      let nextRafId = 1;
+      const nowFn = () => ("undefined" != typeof performance && performance && "function" == typeof performance.now ? performance.now() : Date.now());
+      const getRec = id => (hasMap ? pending.get(id) : pending[id]);
+      const setRec = (id, rec) => { if (hasMap) pending.set(id, rec); else pending[id] = rec; };
+      const delRec = id => { if (hasMap) pending.delete(id); else delete pending[id]; };
+      window.requestAnimationFrame = cb => {
+        const id = nextRafId++;
+        if ("function" != typeof cb) return id;
+        const rec = { fired: !1, rafHandle: 0, timerHandle: 0 };
+        const fire = ts => {
+          if (rec.fired) return;
+          rec.fired = !0;
+          delRec(id);
+          if (rec.timerHandle && "function" == typeof clearTimeout) {
+            try { clearTimeout(rec.timerHandle); } catch (_ct) {}
+          }
+          if (rec.rafHandle && origCAF) {
+            try { origCAF.call(window, rec.rafHandle); } catch (_caf) {}
+          }
+          cb("number" == typeof ts ? ts : nowFn());
+        };
+        setRec(id, rec);
+        try { rec.rafHandle = origRAF.call(window, fire); } catch (_rErr) {}
+        rec.timerHandle = setTimeout(() => fire(nowFn()), 50);
+        return id;
+      };
+      window.cancelAnimationFrame = id => {
+        const rec = getRec(id);
+        if (rec) {
+          rec.fired = !0;
+          delRec(id);
+          if (rec.timerHandle && "function" == typeof clearTimeout) {
+            try { clearTimeout(rec.timerHandle); } catch (_ct) {}
+          }
+          if (rec.rafHandle && origCAF) {
+            try { origCAF.call(window, rec.rafHandle); } catch (_caf) {}
+          }
+        }
+        if (origCAF) {
+          try { origCAF.call(window, id); } catch (_caf2) {}
+        }
+      };
+    }
     try {
       window.dispatchEvent(new Event("focus"));
     } catch (_e) {}
@@ -2188,13 +2274,62 @@ const SG_ORCH_MAX_WARM_WORKERS = 4;
 const SG_ORCH_MAX_SUBAGENTS = 4;
 const SG_ORCH_WARM_IDLE_TTL_MS = 10 * 60 * 1000;
 const SG_ORCH_WORKER_WINDOWS_SESSION_KEY = "sgActiveOrchWorkerWindows";
+const SG_ORCH_POOLS_SESSION_KEY = "sgActiveOrchPools";
+const SG_ORCH_IDLE_ALARM_PREFIX = "sg_orch_idle_";
+const SG_SW_ORPHAN_SWEEP_ALARM = "sg_sw_orphan_sweep";
 const _sgOrchWarmPools = new Map();
 const _activeOrchWorkerWindowIds = new Set();
+
+function sgPersistOrchPoolSession(pool) {
+  if (!pool || typeof pool.srcTabId !== "number") return Promise.resolve();
+  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session) return Promise.resolve();
+  const key = String(pool.srcTabId);
+  const tabIds = Array.isArray(pool.workers)
+    ? pool.workers.filter(w => w && typeof w.tabId === "number").map(w => w.tabId)
+    : [];
+  const snapshot = {
+    runId: pool.runId || "",
+    workerWindowId: typeof pool.workerWindowId === "number" ? pool.workerWindowId : null,
+    tabIds,
+    expiresAt: Date.now() + SG_ORCH_WARM_IDLE_TTL_MS
+  };
+  return sgEnqueueSessionTempTabOp(async () => {
+    try {
+      const data = await chrome.storage.session.get(SG_ORCH_POOLS_SESSION_KEY);
+      const raw = data && data[SG_ORCH_POOLS_SESSION_KEY];
+      const map = raw && typeof raw === "object" && !Array.isArray(raw) ? Object.assign({}, raw) : {};
+      map[key] = snapshot;
+      await chrome.storage.session.set({ [SG_ORCH_POOLS_SESSION_KEY]: map });
+    } catch (_e) {}
+  });
+}
+
+function sgRemoveOrchPoolSession(srcTabId) {
+  if (typeof srcTabId !== "number") return Promise.resolve();
+  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session) return Promise.resolve();
+  const key = String(srcTabId);
+  return sgEnqueueSessionTempTabOp(async () => {
+    try {
+      const data = await chrome.storage.session.get(SG_ORCH_POOLS_SESSION_KEY);
+      const raw = data && data[SG_ORCH_POOLS_SESSION_KEY];
+      if (!raw || typeof raw !== "object" || !Object.prototype.hasOwnProperty.call(raw, key)) return;
+      const map = Object.assign({}, raw);
+      delete map[key];
+      await chrome.storage.session.set({ [SG_ORCH_POOLS_SESSION_KEY]: map });
+    } catch (_e) {}
+  });
+}
 
 function sgClearOrchPoolIdleTimer(pool) {
   if (pool && pool.idleTimer) {
     clearTimeout(pool.idleTimer);
     pool.idleTimer = null;
+  }
+  if (pool && typeof pool.srcTabId === "number" && typeof chrome !== "undefined" && chrome.alarms && typeof chrome.alarms.clear === "function") {
+    try {
+      const p = chrome.alarms.clear(SG_ORCH_IDLE_ALARM_PREFIX + pool.srcTabId);
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch (_e) {}
   }
 }
 
@@ -2203,31 +2338,233 @@ function sgScheduleOrchPoolIdleTimer(pool) {
   sgClearOrchPoolIdleTimer(pool);
   const runId = pool.runId;
   const srcTabId = pool.srcTabId;
+  sgPersistOrchPoolSession(pool).catch(() => {});
+  if (typeof chrome !== "undefined" && chrome.alarms && typeof chrome.alarms.create === "function") {
+    try {
+      chrome.alarms.create(SG_ORCH_IDLE_ALARM_PREFIX + srcTabId, {
+        delayInMinutes: Math.max(1, SG_ORCH_WARM_IDLE_TTL_MS / 60000)
+      });
+      return;
+    } catch (_e) {}
+  }
   pool.idleTimer = setTimeout(() => {
     pool.idleTimer = null;
     sgDestroyOrchWarmPool(srcTabId, runId).catch(() => {});
   }, SG_ORCH_WARM_IDLE_TTL_MS);
 }
 
-async function sgCleanupOrphanedOrchWorkersOnBoot() {
-  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session || "function" != typeof chrome.storage.session.get) return;
-  if (_sgOrchWarmPools.size > 0) return;
-  try {
-    const leftoverWins = await sgDrainTrackedOrchWorkerWindows();
-    if (Array.isArray(leftoverWins) && leftoverWins.length > 0 && chrome.windows && "function" == typeof chrome.windows.remove) {
-      for (const wid of leftoverWins) {
-        try { await chrome.windows.remove(wid); } catch (_e) {}
+function sgGetLiveOrchResourceIds() {
+  const livePoolKeys = new Set();
+  const liveWinIds = new Set(_activeOrchWorkerWindowIds);
+  const liveTabIds = new Set(_activeOrchestratorTabIds);
+  for (const [k, pool] of _sgOrchWarmPools.entries()) {
+    livePoolKeys.add(String(k));
+    if (pool && "object" == typeof pool) {
+      if ("number" == typeof pool.workerWindowId) liveWinIds.add(pool.workerWindowId);
+      if (Array.isArray(pool.workers)) {
+        for (const w of pool.workers) {
+          if (w && "number" == typeof w.tabId) liveTabIds.add(w.tabId);
+        }
       }
     }
-    const leftoverTabs = await sgDrainTrackedTempTabs("orch");
-    if (Array.isArray(leftoverTabs) && leftoverTabs.length > 0 && chrome.tabs && "function" == typeof chrome.tabs.remove) {
-      for (const tid of leftoverTabs) {
-        try { await chrome.tabs.remove(tid); } catch (_e) {}
+  }
+  return { livePoolKeys, liveWinIds, liveTabIds };
+}
+
+async function sgCleanupOrphanedOrchWorkersOnBoot() {
+  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session || "function" != typeof chrome.storage.session.get) return;
+  try {
+    const orphanWinIds = new Set();
+    const orphanTabIds = new Set();
+
+    await sgEnqueueSessionTempTabOp(async () => {
+      try {
+        const data = await chrome.storage.session.get([
+          SG_ORCH_POOLS_SESSION_KEY,
+          SG_ORCH_WORKER_WINDOWS_SESSION_KEY,
+          SG_TEMP_TABS_SESSION_KEY
+        ]);
+        const { liveWinIds, liveTabIds } = sgGetLiveOrchResourceIds();
+
+        const rawPools = data && data[SG_ORCH_POOLS_SESSION_KEY];
+        if (rawPools && typeof rawPools === "object" && !Array.isArray(rawPools) && Object.keys(rawPools).length > 0) {
+          const keptPools = {};
+          let poolsChanged = !1;
+          for (const key of Object.keys(rawPools)) {
+            if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+            const rec = rawPools[key];
+            if (!rec || typeof rec !== "object") {
+              poolsChanged = !0;
+              continue;
+            }
+            const numKey = Number(key);
+            const livePool = Number.isFinite(numKey) ? _sgOrchWarmPools.get(numKey) : null;
+            const sameRun = Boolean(livePool && rec.runId && livePool.runId && rec.runId === livePool.runId);
+            const recWinLive = "number" == typeof rec.workerWindowId && liveWinIds.has(rec.workerWindowId);
+            const recTabLive = Array.isArray(rec.tabIds) && rec.tabIds.some(tid => "number" == typeof tid && liveTabIds.has(tid));
+            if (sameRun || recWinLive || recTabLive) {
+              keptPools[key] = rec;
+            } else {
+              poolsChanged = !0;
+              if (typeof rec.workerWindowId === "number" && !liveWinIds.has(rec.workerWindowId)) {
+                orphanWinIds.add(rec.workerWindowId);
+              }
+              if (Array.isArray(rec.tabIds)) {
+                for (const tid of rec.tabIds) {
+                  if (typeof tid === "number" && !liveTabIds.has(tid)) {
+                    orphanTabIds.add(tid);
+                  }
+                }
+              }
+            }
+          }
+          if (poolsChanged) {
+            await chrome.storage.session.set({ [SG_ORCH_POOLS_SESSION_KEY]: keptPools });
+          }
+        }
+
+        const rawWins = data && data[SG_ORCH_WORKER_WINDOWS_SESSION_KEY];
+        if (Array.isArray(rawWins) && rawWins.length > 0) {
+          const keptWins = [];
+          let winsChanged = !1;
+          for (const wid of rawWins) {
+            if (typeof wid === "number" && liveWinIds.has(wid)) {
+              if (!keptWins.includes(wid)) keptWins.push(wid);
+            } else {
+              winsChanged = !0;
+              if (typeof wid === "number") orphanWinIds.add(wid);
+            }
+          }
+          if (winsChanged) {
+            await chrome.storage.session.set({ [SG_ORCH_WORKER_WINDOWS_SESSION_KEY]: keptWins });
+          }
+        }
+
+        const rawTempMap = data && data[SG_TEMP_TABS_SESSION_KEY];
+        if (rawTempMap && typeof rawTempMap === "object" && !Array.isArray(rawTempMap)) {
+          const cleanedMap = Object.assign({}, rawTempMap);
+          let tempChanged = !1;
+          for (const bucket of ["orch", "opt", "scrape", "batch", "audit"]) {
+            const list = rawTempMap[bucket];
+            if (!Array.isArray(list) || list.length === 0) continue;
+            const liveSet = bucket === "orch" ? liveTabIds : sgGetTempTabSet(bucket);
+            const keptTabs = [];
+            let bucketChanged = !1;
+            for (const tid of list) {
+              if (typeof tid === "number" && liveSet && liveSet.has(tid)) {
+                if (!keptTabs.includes(tid)) keptTabs.push(tid);
+              } else {
+                bucketChanged = !0;
+                if (typeof tid === "number") orphanTabIds.add(tid);
+              }
+            }
+            if (keptTabs.length !== list.length) bucketChanged = !0;
+            if (bucketChanged) {
+              tempChanged = !0;
+              cleanedMap[bucket] = keptTabs;
+            }
+          }
+          if (tempChanged) {
+            await chrome.storage.session.set({ [SG_TEMP_TABS_SESSION_KEY]: cleanedMap });
+          }
+        }
+      } catch (_e) {}
+    });
+
+    if (orphanWinIds.size > 0 && chrome.windows && typeof chrome.windows.remove === "function") {
+      for (const wid of orphanWinIds) {
+        const { liveWinIds } = sgGetLiveOrchResourceIds();
+        if (!liveWinIds.has(wid)) {
+          try { await chrome.windows.remove(wid); } catch (_e) {}
+        }
+      }
+    }
+
+    if (orphanTabIds.size > 0 && chrome.tabs && typeof chrome.tabs.remove === "function") {
+      for (const tid of orphanTabIds) {
+        const { liveTabIds } = sgGetLiveOrchResourceIds();
+        let isLive = liveTabIds.has(tid);
+        if (!isLive) {
+          for (const bucket of ["opt", "scrape", "batch", "audit"]) {
+            const activeSet = sgGetTempTabSet(bucket);
+            if (activeSet && activeSet.has(tid)) {
+              isLive = !0;
+              break;
+            }
+          }
+        }
+        if (!isLive) {
+          try { await chrome.tabs.remove(tid); } catch (_e) {}
+        }
       }
     }
   } catch (_e) {}
 }
-sgCleanupOrphanedOrchWorkersOnBoot().catch(() => {});
+
+async function sgHandleOrchIdleAlarm(alarm) {
+  if (!alarm || typeof alarm.name !== "string") return;
+  if (alarm.name.startsWith(SG_ORCH_IDLE_ALARM_PREFIX)) {
+    const srcTabId = Number(alarm.name.slice(SG_ORCH_IDLE_ALARM_PREFIX.length));
+    if (!Number.isFinite(srcTabId)) return;
+    if (_sgOrchWarmPools.has(srcTabId)) {
+      const existingPool = _sgOrchWarmPools.get(srcTabId);
+      if (existingPool && existingPool.busy) return;
+      await sgDestroyOrchWarmPool(srcTabId);
+      return;
+    }
+    let rec = null;
+    await sgEnqueueSessionTempTabOp(async () => {
+      try {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.session) return;
+        const data = await chrome.storage.session.get(SG_ORCH_POOLS_SESSION_KEY);
+        const raw = data && data[SG_ORCH_POOLS_SESSION_KEY];
+        const key = String(srcTabId);
+        if (raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, key)) {
+          rec = raw[key];
+          const map = Object.assign({}, raw);
+          delete map[key];
+          await chrome.storage.session.set({ [SG_ORCH_POOLS_SESSION_KEY]: map });
+        }
+      } catch (_e) {}
+    });
+    if (rec && typeof rec === "object") {
+      if (typeof rec.workerWindowId === "number") {
+        if (chrome.windows && typeof chrome.windows.remove === "function") {
+          try { await chrome.windows.remove(rec.workerWindowId); } catch (_e) {}
+        }
+        await sgUntrackOrchWorkerWindow(rec.workerWindowId);
+      }
+      if (Array.isArray(rec.tabIds)) {
+        for (const tid of rec.tabIds) {
+          if (typeof tid !== "number") continue;
+          if (chrome.tabs && typeof chrome.tabs.remove === "function") {
+            try { await chrome.tabs.remove(tid); } catch (_e) {}
+          }
+          await sgUntrackTempTab("orch", tid);
+        }
+      }
+    }
+    return;
+  }
+  if (alarm.name === SG_SW_ORPHAN_SWEEP_ALARM) {
+    await sgCleanupOrphanedOrchWorkersOnBoot();
+  }
+}
+
+if (typeof chrome !== "undefined" && chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === "function") {
+  chrome.alarms.onAlarm.addListener(sgHandleOrchIdleAlarm);
+}
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === "function") {
+  chrome.runtime.onStartup.addListener(() => {
+    sgCleanupOrphanedOrchWorkersOnBoot().catch(() => {});
+  });
+}
+const _sgBootCleanupPromise = sgCleanupOrphanedOrchWorkersOnBoot().catch(() => {});
+async function sgAwaitBootCleanup(maxWaitMs = 1500) {
+  try {
+    await Promise.race([_sgBootCleanupPromise, new Promise(r => setTimeout(r, maxWaitMs))]);
+  } catch (_e) {}
+}
 
 function sgTrackOrchWorkerWindow(winId) {
   if ("number" != typeof winId) return Promise.resolve();
@@ -2318,6 +2655,7 @@ async function sgDestroyOrchWarmPool(srcTabId, onlyRunId = null) {
   pool.aborted = !0;
   sgClearOrchPoolIdleTimer(pool);
   _sgOrchWarmPools.delete(srcTabId);
+  await sgRemoveOrchPoolSession(srcTabId);
   if (pool.workerWindowPromise) {
     try { await pool.workerWindowPromise; } catch (_e) {}
   }
@@ -2363,6 +2701,7 @@ function sgGetOrCreateOrchPool(srcTab, runId) {
     accountUrl,
     runId: runId || ("orch_" + Date.now()),
     aborted: !1,
+    busy: !1,
     workerWindowId: null,
     workerWindowPromise: null,
     idleTimer: null,
@@ -2421,6 +2760,7 @@ async function sgCreateOrchWorkerTabInWindow(pool, workerUrl, slot) {
       if (win && "number" == typeof win.id) {
         pool.workerWindowId = win.id;
         await sgTrackOrchWorkerWindow(win.id);
+        await sgPersistOrchPoolSession(pool);
         const firstTab = Array.isArray(win.tabs) && win.tabs[0] ? win.tabs[0] : null;
         if (firstTab && "number" == typeof firstTab.id) {
           initialTabId = firstTab.id;
@@ -2560,11 +2900,13 @@ async function sgBootOrchWorkerTab(pool, slot) {
       });
     } catch (e) {}
 
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: spoofFocus,
-      world: "MAIN"
-    });
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: spoofFocus,
+        world: "MAIN"
+      });
+    } catch (_e) {}
 
     const sbStart = Date.now();
     for (; Date.now() - sbStart < 4500 && !pool.aborted;) {
@@ -2735,6 +3077,7 @@ async function sgAcquireOrchWarmWorker(pool, slot) {
     const tid = await sgBootOrchWorkerTab(pool, slot);
     workerEntry.tabId = tid;
     workerEntry.bootPromise = null;
+    sgPersistOrchPoolSession(pool).catch(() => {});
     return workerEntry;
   })();
   return workerEntry.bootPromise;
@@ -2953,6 +3296,18 @@ function sgEnterOrchPromptInTab(text) {
   }
   editor.classList.remove("ql-blank");
   try {
+    if ("function" == typeof document.createRange && "function" == typeof window.getSelection) {
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(editor);
+      range.collapse(!1);
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  } catch (_selErr) {}
+  try {
     editor.dispatchEvent(new InputEvent("input", { bubbles: !0, cancelable: !0, inputType: "insertText" }));
   } catch (e) {
     editor.dispatchEvent(new Event("input", { bubbles: !0 }));
@@ -2970,6 +3325,7 @@ function sgCheckOrchSubmitAcceptedInTab(baselineUserQueries, baselineResponses, 
   }
   const isVisible = el => {
     if (!el || !el.isConnected) return !1;
+    if ("function" == typeof el.closest && el.closest('bard-sidenav, side-navigation-content, mat-dialog-container, .mat-mdc-dialog-container, [role="dialog"]')) return !1;
     if (null !== el.offsetParent) return !0;
     if ("function" == typeof el.getClientRects && el.getClientRects().length > 0) return !0;
     try {
@@ -2981,8 +3337,11 @@ function sgCheckOrchSubmitAcceptedInTab(baselineUserQueries, baselineResponses, 
     return !1;
   };
   const userQueries = document.querySelectorAll('user-query, .user-query-container, .user-message, [data-message-author="user"]').length;
-  const responses = document.querySelectorAll("model-response, .model-response").length;
+  const responseNodes = document.querySelectorAll('model-response, .model-response, [data-message-author="model"]');
+  const responses = responseNodes.length;
   const stopSelectors = [
+    'button[data-test-id="stop-button"]',
+    "button.stop",
     'mat-icon[fonticon="stop"]',
     'mat-icon[data-mat-icon-name="stop"]',
     '[fonticon="stop"]',
@@ -2991,14 +3350,20 @@ function sgCheckOrchSubmitAcceptedInTab(baselineUserQueries, baselineResponses, 
   ];
   let isGenerating = !1;
   for (const sel of stopSelectors) {
-    const el = document.querySelector(sel);
-    if (isVisible(el)) {
-      isGenerating = !0;
-      break;
+    const matches = document.querySelectorAll(sel);
+    for (const el of matches) {
+      if (isVisible(el)) {
+        isGenerating = !0;
+        break;
+      }
     }
+    if (isGenerating) break;
   }
-  if (!isGenerating && document.querySelectorAll('.loading, .spinner, [aria-busy="true"]').length > 0) {
-    isGenerating = !0;
+  if (!isGenerating && responses > (Number(baselineResponses) || 0)) {
+    const latestResp = responseNodes[responses - 1];
+    if (latestResp && "function" == typeof latestResp.querySelector && latestResp.querySelector('.loading, .spinner, [aria-busy="true"]')) {
+      isGenerating = !0;
+    }
   }
   const editor = document.querySelector('rich-textarea .ql-editor, .ql-editor[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
   const editorTextLen = editor ? (editor.textContent || "").trim().length : 0;
@@ -3015,6 +3380,7 @@ function sgSubmitOrchPromptInTab(baselineUserQueries, baselineResponses, useEnte
 
   const isVisible = el => {
     if (!el || !el.isConnected) return !1;
+    if ("function" == typeof el.closest && el.closest('bard-sidenav, side-navigation-content, mat-dialog-container, .mat-mdc-dialog-container, [role="dialog"]')) return !1;
     if (null !== el.offsetParent) return !0;
     if ("function" == typeof el.getClientRects && el.getClientRects().length > 0) return !0;
     try {
@@ -3026,9 +3392,28 @@ function sgSubmitOrchPromptInTab(baselineUserQueries, baselineResponses, useEnte
     return !1;
   };
   const userQueries = document.querySelectorAll('user-query, .user-query-container, .user-message, [data-message-author="user"]').length;
-  const responses = document.querySelectorAll("model-response, .model-response").length;
-  const stopEl = document.querySelector('mat-icon[fonticon="stop"], mat-icon[data-mat-icon-name="stop"], [fonticon="stop"], button[aria-label*="Stop" i], button[aria-label*="Dừng" i]');
-  const isGenerating = isVisible(stopEl);
+  const responseNodes = document.querySelectorAll('model-response, .model-response, [data-message-author="model"]');
+  const responses = responseNodes.length;
+  const stopSelectors = [
+    'button[data-test-id="stop-button"]',
+    "button.stop",
+    'mat-icon[fonticon="stop"]',
+    'mat-icon[data-mat-icon-name="stop"]',
+    '[fonticon="stop"]',
+    'button[aria-label*="Stop" i]',
+    'button[aria-label*="Dừng" i]'
+  ];
+  let isGenerating = !1;
+  for (const sel of stopSelectors) {
+    const matches = document.querySelectorAll(sel);
+    for (const el of matches) {
+      if (isVisible(el)) {
+        isGenerating = !0;
+        break;
+      }
+    }
+    if (isGenerating) break;
+  }
   const editor = document.querySelector('rich-textarea .ql-editor, .ql-editor[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
   const editorTextLen = editor ? (editor.textContent || "").trim().length : 0;
 
@@ -3038,28 +3423,32 @@ function sgSubmitOrchPromptInTab(baselineUserQueries, baselineResponses, useEnte
 
   const isDisabledBtn = btn => {
     if (!btn || !btn.isConnected) return !0;
+    if ("function" == typeof btn.closest && btn.closest('bard-sidenav, side-navigation-content, mat-dialog-container, .mat-mdc-dialog-container, [role="dialog"], bard-header, top-bar-actions')) return !0;
     if (btn.disabled || btn.hasAttribute("disabled") || "true" === btn.getAttribute("aria-disabled")) return !0;
     if (btn.classList.contains("stop")) return !0;
     if (btn.querySelector('mat-icon[fonticon="stop"], mat-icon[data-mat-icon-name="stop"], mat-icon[fonticon="mic"], mat-icon[data-mat-icon-name="mic"]')) return !0;
     const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
-    if (aria.includes("stop") || aria.includes("dừng") || aria.includes("micro") || aria.includes("voice") || aria.includes("ghi âm")) return !0;
+    const title = (btn.getAttribute("title") || "").toLowerCase();
+    const txt = (btn.textContent || "").toLowerCase();
+    const meta = aria + " " + title + " " + txt;
+    if (meta.includes("stop") || meta.includes("dừng") || meta.includes("micro") || meta.includes("voice") || meta.includes("ghi âm")
+      || meta.includes("feedback") || meta.includes("phản hồi") || meta.includes("share") || meta.includes("chia sẻ")
+      || meta.includes("report") || meta.includes("báo cáo") || meta.includes("upload") || meta.includes("tải lên")) return !0;
     return !1;
   };
 
   const selectors = [
-    'button[data-test-id="send-button"]',
+    'input-area-v2 button[data-test-id="send-button"], .input-area button[data-test-id="send-button"], button[data-test-id="send-button"]',
     'button[data-testid="send_button"]',
-    'button[aria-label*="Send" i]',
-    'button[aria-label*="Gửi" i]',
     '.send-button-container button:has(mat-icon[fonticon="send"])',
     '.send-button-container button:has(mat-icon[data-mat-icon-name="send"])',
     '.send-button-container button:has(mat-icon[fonticon="arrow_upward"])',
     '.send-button-container button:has(mat-icon[data-mat-icon-name="arrow_upward"])',
-    'button:has(mat-icon[fonticon="send"])',
-    'button:has(mat-icon[data-mat-icon-name="send"])',
-    "button.send-button",
-    ".send-button button",
-    ".send-button-container button"
+    'input-area-v2 button.send-button, .input-area button.send-button, button.send-button',
+    '.send-button button, .send-button-container button',
+    'input-area-v2 button[aria-label*="Send" i], .input-area button[aria-label*="Send" i], .input-area-container button[aria-label*="Send" i], .text-input-field button[aria-label*="Send" i]',
+    'input-area-v2 button[aria-label*="Gửi" i], .input-area button[aria-label*="Gửi" i], .input-area-container button[aria-label*="Gửi" i], .text-input-field button[aria-label*="Gửi" i]',
+    'input-area-v2 button:has(mat-icon[fonticon="send"]), input-area-v2 button:has(mat-icon[fonticon="arrow_upward"])'
   ];
 
   let sendBtn = null;
@@ -3101,7 +3490,22 @@ function sgSubmitOrchPromptInTab(baselineUserQueries, baselineResponses, useEnte
 }
 
 function sgCheckOrchWorkerResponseInTab(baselineCount, baselineUserQueries) {
+  const isVisible = el => {
+    if (!el || !el.isConnected) return !1;
+    if ("function" == typeof el.closest && el.closest('bard-sidenav, side-navigation-content, mat-dialog-container, .mat-mdc-dialog-container, [role="dialog"]')) return !1;
+    if (null !== el.offsetParent) return !0;
+    if ("function" == typeof el.getClientRects && el.getClientRects().length > 0) return !0;
+    try {
+      if ("function" == typeof getComputedStyle) {
+        const cs = getComputedStyle(el);
+        return Boolean(cs && "none" !== cs.display && "hidden" !== cs.visibility);
+      }
+    } catch (_e) {}
+    return !1;
+  };
   const stopSelectors = [
+    'button[data-test-id="stop-button"]',
+    "button.stop",
     'mat-icon[fonticon="stop"]',
     'mat-icon[data-mat-icon-name="stop"]',
     '[fonticon="stop"]',
@@ -3110,26 +3514,36 @@ function sgCheckOrchWorkerResponseInTab(baselineCount, baselineUserQueries) {
   ];
   let isGenerating = !1;
   for (const sel of stopSelectors) {
-    const el = document.querySelector(sel);
-    if (el && (null !== el.offsetParent || ("function" == typeof el.getClientRects && el.getClientRects().length > 0))) {
-      isGenerating = !0;
-      break;
+    const matches = document.querySelectorAll(sel);
+    for (const el of matches) {
+      if (isVisible(el)) {
+        isGenerating = !0;
+        break;
+      }
     }
-  }
-  if (!isGenerating && document.querySelectorAll('.loading, .spinner, [aria-busy="true"]').length > 0) {
-    isGenerating = !0;
+    if (isGenerating) break;
   }
 
   const userQueries = document.querySelectorAll('user-query, .user-query-container, .user-message, [data-message-author="user"]').length;
-  const responses = document.querySelectorAll("model-response, .model-response");
+  const responses = document.querySelectorAll('model-response, .model-response, [data-message-author="model"]');
   const totalCount = responses.length;
+  const baseNum = Number(baselineCount) || 0;
+  const latestResp = totalCount > baseNum ? responses[totalCount - 1] : null;
+  if (!isGenerating && latestResp && "function" == typeof latestResp.querySelector && latestResp.querySelector('.loading, .spinner, [aria-busy="true"]')) {
+    isGenerating = !0;
+  }
   const hasThoughtActive = Boolean(document.querySelector("thinking-overlay, model-thoughts, .thoughts-container"));
-  const queryAccepted = userQueries > (Number(baselineUserQueries) || 0) || totalCount > (Number(baselineCount) || 0) || isGenerating;
+  const queryAccepted = userQueries > (Number(baselineUserQueries) || 0) || totalCount > baseNum || isGenerating;
+  const editor = document.querySelector('rich-textarea .ql-editor, .ql-editor[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
+  const editorTextLen = editor ? (editor.textContent || "").trim().length : -1;
 
-  if (totalCount <= (Number(baselineCount) || 0)) {
+  if (totalCount <= baseNum) {
     return {
       isGenerating,
       queryAccepted,
+      userQueries,
+      responses: totalCount,
+      editorTextLen,
       phase: isGenerating ? (hasThoughtActive ? "thinking" : "starting") : "waiting",
       response: null
     };
@@ -3166,7 +3580,6 @@ function sgCheckOrchWorkerResponseInTab(baselineCount, baselineUserQueries) {
     return out.trim();
   };
 
-  const latestResp = responses[totalCount - 1];
   let extractedText = null;
   if (latestResp) {
     const panels = latestResp.querySelectorAll(
@@ -3174,7 +3587,7 @@ function sgCheckOrchWorkerResponseInTab(baselineCount, baselineUserQueries) {
     );
     for (let i = panels.length - 1; i >= 0; i--) {
       const p = panels[i];
-      if (!p.closest("thinking-overlay, model-thoughts, .thoughts-container, .thoughts-content, .thoughts-wrapper")) {
+      if ("function" != typeof p.closest || !p.closest("thinking-overlay, model-thoughts, .thoughts-container, .thoughts-content, .thoughts-wrapper")) {
         const candidate = extractDomText(p);
         if (candidate && candidate.length > 0) {
           extractedText = candidate;
@@ -3191,6 +3604,9 @@ function sgCheckOrchWorkerResponseInTab(baselineCount, baselineUserQueries) {
   return {
     isGenerating,
     queryAccepted: !0,
+    userQueries,
+    responses: totalCount,
+    editorTextLen,
     phase: extractedText && extractedText.length > 0 ? "streaming" : (hasThoughtActive ? "thinking" : "starting"),
     response: extractedText
   };
@@ -3202,6 +3618,14 @@ async function sgPollOrchWorkerResponse(pool, tabId, baselineCount, baselineUser
   let stableTicks = 0;
   let lastPhase = "";
   let everAccepted = !1;
+  let sawTurnDom = !1;
+  let lastSnap = {
+    uq: Number(baselineUserQueries) || 0,
+    mr: Number(baselineCount) || 0,
+    gen: !1,
+    ed: -1,
+    phase: "init"
+  };
 
   for (; Date.now() - start < timeoutMs;) {
     if (pool.aborted) throw new Error("Orchestration aborted");
@@ -3213,6 +3637,16 @@ async function sgPollOrchWorkerResponse(pool, tabId, baselineCount, baselineUser
       });
       const info = res && res[0] ? res[0].result : null;
       if (info) {
+        lastSnap = {
+          uq: "number" == typeof info.userQueries ? info.userQueries : lastSnap.uq,
+          mr: "number" == typeof info.responses ? info.responses : lastSnap.mr,
+          gen: Boolean(info.isGenerating),
+          ed: "number" == typeof info.editorTextLen ? info.editorTextLen : lastSnap.ed,
+          phase: info.phase || lastSnap.phase
+        };
+        if (lastSnap.uq > (Number(baselineUserQueries) || 0) || lastSnap.mr > (Number(baselineCount) || 0)) {
+          sawTurnDom = !0;
+        }
         if (info.queryAccepted) everAccepted = !0;
         const text = info.response || "";
         const len = text.length;
@@ -3237,7 +3671,9 @@ async function sgPollOrchWorkerResponse(pool, tabId, baselineCount, baselineUser
             lastLen = len;
           }
         } else if (!everAccepted && Date.now() - start > 12e3) {
-          throw new Error("SUBMIT_NOT_ACCEPTED (poll_12s)");
+          throw new Error(`SUBMIT_NOT_ACCEPTED (poll_12s,uq=${lastSnap.uq},mr=${lastSnap.mr},ed=${lastSnap.ed})`);
+        } else if (!sawTurnDom && Date.now() - start > 18e3) {
+          throw new Error(`SUBMIT_NOT_ACCEPTED (no_turn_18s,uq=${lastSnap.uq},mr=${lastSnap.mr},gen=${lastSnap.gen ? 1 : 0},ed=${lastSnap.ed})`);
         }
       }
     } catch (e) {
@@ -3246,7 +3682,7 @@ async function sgPollOrchWorkerResponse(pool, tabId, baselineCount, baselineUser
     }
     await sleep(220);
   }
-  throw new Error("Sub-agent response timeout");
+  throw new Error(`Sub-agent response timeout (uq=${lastSnap.uq},mr=${lastSnap.mr},gen=${lastSnap.gen ? 1 : 0},ed=${lastSnap.ed},ph=${lastSnap.phase})`);
 }
 
 async function sgRunTaskOnOrchWorker(pool, worker, task) {
@@ -3273,7 +3709,7 @@ async function sgRunTaskOnOrchWorker(pool, worker, task) {
     const baseRes = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => ({
-        responses: document.querySelectorAll("model-response, .model-response").length,
+        responses: document.querySelectorAll('model-response, .model-response, [data-message-author="model"]').length,
         queries: document.querySelectorAll('user-query, .user-query-container, .user-message, [data-message-author="user"]').length
       })
     });
@@ -3311,6 +3747,14 @@ async function sgRunTaskOnOrchWorker(pool, worker, task) {
   const submitStart = Date.now();
   for (let attempt = 0; attempt < 12 && Date.now() - submitStart < 9500 && !pool.aborted && !submitted; attempt++) {
     try {
+      if (3 === attempt && 0 === totalClicks && "no_btn" === lastMethod) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: sgEnterOrchPromptInTab,
+          args: [task.prompt]
+        });
+        await sleep(120);
+      }
       const useEnter = attempt >= 6;
       const subRes = await chrome.scripting.executeScript({
         target: { tabId },
@@ -3450,6 +3894,7 @@ async function sgRunTaskOnOrchWorker(pool, worker, task) {
 async function handleOrchestratorPrewarm(msg, sender) {
   const srcTabId = sender?.tab?.id;
   if (!srcTabId) return { success: !1, error: "No source tab ID" };
+  await sgAwaitBootCleanup();
   const srcTab = await chrome.tabs.get(srcTabId);
   const pool = sgGetOrCreateOrchPool(srcTab, msg.runId);
   sgScheduleOrchPoolIdleTimer(pool);
@@ -3467,6 +3912,7 @@ async function handleOrchestratorPrewarm(msg, sender) {
 async function handleOrchestratorRunSubagents(msg, sender) {
   const srcTabId = sender?.tab?.id;
   if (!srcTabId) throw new Error("No source tab ID provided for orchestrator");
+  await sgAwaitBootCleanup();
   const srcTab = await chrome.tabs.get(srcTabId);
   const pool = sgGetOrCreateOrchPool(srcTab, msg.runId);
   sgClearOrchPoolIdleTimer(pool);
@@ -3475,6 +3921,7 @@ async function handleOrchestratorRunSubagents(msg, sender) {
     return { success: !1, error: "No sub-agent tasks provided", results: [] };
   }
 
+  pool.busy = !0;
   const concurrency = Math.min(SG_ORCH_MAX_WARM_WORKERS, rawTasks.length, Math.max(1, Number(msg.maxConcurrency) || SG_ORCH_MAX_WARM_WORKERS));
   const results = new Array(rawTasks.length);
   let nextTaskIdx = 0;
@@ -3558,24 +4005,46 @@ async function handleOrchestratorRunSubagents(msg, sender) {
 
     await Promise.all(runners);
     const wasAborted = pool.aborted;
+    pool.busy = !1;
     if (!msg.keepPoolWarm || wasAborted) {
       await sgDestroyOrchWarmPool(srcTabId, pool.runId);
     } else {
       sgScheduleOrchPoolIdleTimer(pool);
     }
-    return {
-      success: !wasAborted && results.some(r => r && r.success),
+    const cleanResults = results.filter(Boolean);
+    const anySuccess = !wasAborted && cleanResults.some(r => r && r.success);
+    let topError = null;
+    if (!wasAborted && !anySuccess) {
+      const errs = [];
+      for (const r of cleanResults) {
+        const msgStr = r && r.error ? String(r.error).trim() : "";
+        if (msgStr && !errs.includes(msgStr)) {
+          errs.push(msgStr);
+          if (errs.length >= 2) break;
+        }
+      }
+      const errSummary = errs.join(" | ");
+      topError = errSummary
+        ? ("Sub-agent worker error: " + errSummary)
+        : "All sub-agent workers failed to produce a response.";
+      console.warn("[Gemini Power Suite] Orchestrator sub-agents failed:", topError, cleanResults);
+    }
+    return Object.assign({
+      success: anySuccess,
       aborted: wasAborted,
       runId: pool.runId,
-      results: results.filter(Boolean)
-    };
+      results: cleanResults
+    }, topError ? { error: topError } : {});
   } catch (err) {
+    pool.busy = !1;
     await sgDestroyOrchWarmPool(srcTabId, pool.runId);
     return {
       success: !1,
       error: String(err && err.message || err),
       results: results.filter(Boolean)
     };
+  } finally {
+    pool.busy = !1;
   }
 }
 

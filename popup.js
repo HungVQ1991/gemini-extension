@@ -244,6 +244,7 @@ document.addEventListener("DOMContentLoaded", () => {
     warnConfirm.addEventListener("click", () => {
       if (masterToggle) masterToggle.checked = false;
       setMasterState(false);
+      closeKeybindsModal(false);
       closeWarnModal(true);
     });
   }
@@ -276,8 +277,8 @@ document.addEventListener("DOMContentLoaded", () => {
     { id: "folders-toggle", storageKey: "foldersEnabled", defaultOn: true, enableMsg: "ENABLE_FOLDERS", disableMsg: "DISABLE_FOLDERS", onChange: updateTrashcanDependencyState },
     { id: "trashcan-toggle", storageKey: "trashcanEnabled", defaultOn: true, enableMsg: "ENABLE_TRASHCAN", disableMsg: "DISABLE_TRASHCAN" },
     { id: "prompts-toggle", storageKey: "promptsEnabled", defaultOn: true, enableMsg: "ENABLE_PROMPTS", disableMsg: "DISABLE_PROMPTS" },
-    { id: "skills-injection-toggle", storageKey: "skillsInjectionEnabled", defaultOn: true, enableMsg: "ENABLE_SKILLS_INJECTION", disableMsg: "DISABLE_SKILLS_INJECTION" },
-    { id: "baseline-injection-toggle", storageKey: "baselineInjectionEnabled", defaultOn: true, enableMsg: "ENABLE_BASELINE_INJECTION", disableMsg: "DISABLE_BASELINE_INJECTION" },
+    { id: "skills-injection-toggle", storageKey: "skillsInjectionEnabled", defaultOn: false, enableMsg: "ENABLE_SKILLS_INJECTION", disableMsg: "DISABLE_SKILLS_INJECTION" },
+    { id: "baseline-injection-toggle", storageKey: "baselineInjectionEnabled", defaultOn: false, enableMsg: "ENABLE_BASELINE_INJECTION", disableMsg: "DISABLE_BASELINE_INJECTION" },
     // Interface Enhancements
     { id: "folder-upload-toggle", storageKey: "folderUploadEnabled", defaultOn: true, enableMsg: "ENABLE_FOLDER_UPLOAD", disableMsg: "DISABLE_FOLDER_UPLOAD" },
     { id: "export-btn-toggle", storageKey: "showExportButton", defaultOn: true, enableMsg: "ENABLE_EXPORT_BTN", disableMsg: "DISABLE_EXPORT_BTN" },
@@ -306,7 +307,9 @@ document.addEventListener("DOMContentLoaded", () => {
     { id: "hide-upgrade-btns-toggle", storageKey: "hideUpgradeButtons", defaultOn: true, enableMsg: "HIDE_UPGRADE_BUTTONS", disableMsg: "SHOW_UPGRADE_BUTTONS" },
     { id: "location-info-toggle", storageKey: "hideLocationInfo", defaultOn: true, enableMsg: "HIDE_LOCATION_INFO", disableMsg: "SHOW_LOCATION_INFO" },
     { id: "activity-toggle", storageKey: "hideActivity", defaultOn: true, enableMsg: "HIDE_ACTIVITY", disableMsg: "SHOW_ACTIVITY" },
-    { id: "hide-gems-button-toggle", storageKey: "hideGemsSidebarButton", defaultOn: false, enableMsg: "HIDE_GEMS_SIDEBAR_BUTTON", disableMsg: "SHOW_GEMS_SIDEBAR_BUTTON" }
+    { id: "hide-gems-button-toggle", storageKey: "hideGemsSidebarButton", defaultOn: true, enableMsg: "HIDE_GEMS_SIDEBAR_BUTTON", disableMsg: "SHOW_GEMS_SIDEBAR_BUTTON" },
+    // Keyboard Shortcuts
+    { id: "focus-shortcut-toggle", storageKey: "focusShortcutEnabled", defaultOn: true }
   ];
 
   const toggleHydrators = toggleConfigs.map(cfg => setupToggle(cfg)).filter(Boolean);
@@ -410,12 +413,381 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const hydrateOptimizeSeg = wireSegmented("optimize-model-seg", "optimizeModel", "flash");
 
+  const SHORTCUT_CONFIGS = [
+    // General & Navigation
+    { group: "General & Navigation", label: "Optimize Prompt", storageKey: "optimizeShortcut", enabledKey: "optimizeShortcutEnabled", defaultShortcut: { key: "o", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Fix Grammar", storageKey: "grammarShortcut", enabledKey: "grammarShortcutEnabled", defaultShortcut: { key: "g", alt: false, ctrl: true, shift: true, meta: false } },
+    { group: "General & Navigation", label: "Open Folders", storageKey: "foldersShortcut", enabledKey: "foldersShortcutEnabled", defaultShortcut: { key: "f", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Open Prompts", storageKey: "promptsShortcut", enabledKey: "promptsShortcutEnabled", defaultShortcut: { key: "l", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Open Settings", storageKey: "settingsShortcut", enabledKey: "settingsShortcutEnabled", defaultShortcut: { key: "s", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Toggle Sidebar", storageKey: "sidebarShortcut", enabledKey: "sidebarShortcutEnabled", defaultShortcut: { key: "q", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "New Chat", storageKey: "newchatShortcut", enabledKey: "newchatShortcutEnabled", defaultShortcut: { key: "n", alt: true, ctrl: true, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Temporary Chat", storageKey: "tempChatShortcut", enabledKey: "tempChatShortcutEnabled", defaultShortcut: { key: "a", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Saved Info", storageKey: "instructionsShortcut", enabledKey: "instructionsShortcutEnabled", defaultShortcut: { key: "i", alt: true, ctrl: true, shift: false, meta: false } },
+    // Model & Thinking
+    { group: "Model & Thinking", label: "Cycle Model Mode", storageKey: "cycleModeShortcut", enabledKey: "cycleModeShortcutEnabled", defaultShortcut: { key: "p", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Model & Thinking", label: "Cycle Thinking Level", storageKey: "thinkingLevelShortcut", enabledKey: "thinkingLevelShortcutEnabled", defaultShortcut: { key: "t", alt: true, ctrl: false, shift: false, meta: false } },
+    // Gemini Tools
+    { group: "Gemini Tools", label: "Tool: Image", storageKey: "imageShortcut", enabledKey: "imageShortcutEnabled", defaultShortcut: { key: "i", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Gemini Tools", label: "Tool: Clear Tool", storageKey: "noToolShortcut", enabledKey: "noToolShortcutEnabled", defaultShortcut: { key: "n", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Gemini Tools", label: "Tool: Deep Research", storageKey: "deepResearchShortcut", enabledKey: "deepResearchShortcutEnabled", defaultShortcut: { key: "r", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Gemini Tools", label: "Tool: Canvas", storageKey: "canvasShortcut", enabledKey: "canvasShortcutEnabled", defaultShortcut: { key: "c", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Gemini Tools", label: "Tool: Video", storageKey: "videoShortcut", enabledKey: "videoShortcutEnabled", defaultShortcut: { key: "v", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "Gemini Tools", label: "Tool: Music", storageKey: "musicShortcut", enabledKey: "musicShortcutEnabled", defaultShortcut: { key: "m", alt: true, ctrl: false, shift: false, meta: false } }
+  ];
+
+  function normalizeShortcutObj(raw, fallback) {
+    const src = raw && typeof raw === "object" && raw.key ? raw : fallback;
+    return {
+      key: String(src.key || "").toLowerCase(),
+      alt: Boolean(src.alt),
+      ctrl: Boolean(src.ctrl),
+      shift: Boolean(src.shift),
+      meta: Boolean(src.meta)
+    };
+  }
+
+  function formatShortcutObj(sc) {
+    const parts = [];
+    if (sc.ctrl) parts.push("Ctrl");
+    if (sc.alt) parts.push("Alt");
+    if (sc.shift) parts.push("Shift");
+    if (sc.meta) parts.push("Meta");
+    parts.push(String(sc.key || "").toUpperCase());
+    return parts.join("+");
+  }
+
+  function shortcutSignature(sc) {
+    return `${sc.ctrl ? 1 : 0}:${sc.alt ? 1 : 0}:${sc.shift ? 1 : 0}:${sc.meta ? 1 : 0}:${String(sc.key || "").toLowerCase()}`;
+  }
+
+  function shortcutBaseKeyFromCode(code) {
+    if (/^Key[A-Z]$/.test(code || "")) return code.slice(3).toLowerCase();
+    if (/^Digit[0-9]$/.test(code || "")) return code.slice(5);
+    return {
+      Minus: "-",
+      Equal: "=",
+      BracketLeft: "[",
+      BracketRight: "]",
+      Backslash: "\\",
+      Semicolon: ";",
+      Quote: "'",
+      Comma: ",",
+      Period: ".",
+      Slash: "/",
+      Backquote: "`"
+    }[code] || null;
+  }
+
+  function extractRecordedShortcut(e) {
+    const rawLow = String(e.key || "").toLowerCase();
+    if (["control", "shift", "alt", "meta", "os", "dead", "process", "altgraph", "capslock", "numlock", "scrolllock"].includes(rawLow)) {
+      return null;
+    }
+    const baseKey = shortcutBaseKeyFromCode(e.code) || (
+      /^f(?:[1-9]|1[0-2])$/.test(rawLow) || ["arrowup", "arrowdown", "arrowleft", "arrowright", "home", "end", "pageup", "pagedown", "insert", "delete"].includes(rawLow)
+        ? rawLow
+        : ""
+    );
+    if (!baseKey) {
+      return { error: "Unsupported key. Use letters, numbers, punctuation, arrows, or F1-F12." };
+    }
+    const isFKey = /^f(?:[1-9]|1[0-2])$/.test(baseKey);
+    const hasMainMod = Boolean(e.ctrlKey || e.altKey || e.metaKey);
+    if (!hasMainMod && !isFKey) {
+      return { error: "Use Ctrl, Alt, or Meta + key (or F1-F12) so typing is not interrupted." };
+    }
+    return {
+      shortcut: {
+        key: baseKey,
+        alt: Boolean(e.altKey),
+        ctrl: Boolean(e.ctrlKey),
+        shift: Boolean(e.shiftKey),
+        meta: Boolean(e.metaKey)
+      }
+    };
+  }
+
+  const shortcutState = new Map();
+  SHORTCUT_CONFIGS.forEach(cfg => {
+    shortcutState.set(cfg.storageKey, {
+      shortcut: normalizeShortcutObj(null, cfg.defaultShortcut),
+      enabled: true
+    });
+  });
+
+  const openKeybindsBtn = document.getElementById("open-keybinds-btn");
+  const keybindsModal = document.getElementById("keybinds-modal");
+  const keybindsCloseBtn = document.getElementById("keybinds-close-btn");
+  const keybindsDoneBtn = document.getElementById("keybinds-done-btn");
+  const keybindsResetAllBtn = document.getElementById("keybinds-reset-all-btn");
+  const keybindsSearch = document.getElementById("keybinds-search");
+  const keybindsStatus = document.getElementById("keybinds-status");
+  const keybindsList = document.getElementById("keybinds-list");
+  const cmdPaletteToggle = document.getElementById("command-palette-toggle");
+
+  let recordingKeybindKey = null;
+  let transientKeybindStatus = null;
+
+  function computeKeybindConflicts() {
+    const bySig = new Map();
+    SHORTCUT_CONFIGS.forEach(cfg => {
+      const entry = shortcutState.get(cfg.storageKey);
+      if (!entry || !entry.enabled) return;
+      const sig = shortcutSignature(entry.shortcut);
+      if (!bySig.has(sig)) bySig.set(sig, []);
+      bySig.get(sig).push(cfg);
+    });
+
+    const conflicts = new Map();
+    const cpActive = !cmdPaletteToggle || cmdPaletteToggle.checked;
+    const ctrlKSig = "1:0:0:0:k";
+    const metaKSig = "0:0:0:1:k";
+
+    SHORTCUT_CONFIGS.forEach(cfg => {
+      const entry = shortcutState.get(cfg.storageKey);
+      if (!entry || !entry.enabled) return;
+      const sig = shortcutSignature(entry.shortcut);
+      const dupes = (bySig.get(sig) || []).filter(other => other.storageKey !== cfg.storageKey);
+      const reasons = dupes.map(d => d.label);
+      if (cpActive && (sig === ctrlKSig || sig === metaKSig)) {
+        reasons.push("Command Palette");
+      }
+      if (reasons.length > 0) {
+        conflicts.set(cfg.storageKey, reasons);
+      }
+    });
+    return conflicts;
+  }
+
+  function updateKeybindStatusBanner(conflicts) {
+    if (!keybindsStatus) return;
+    if (transientKeybindStatus) {
+      keybindsStatus.textContent = transientKeybindStatus.text;
+      keybindsStatus.className = `sg-keybinds-status ${transientKeybindStatus.kind === "error" ? "is-error" : "is-warn"}`;
+      return;
+    }
+    if (recordingKeybindKey) {
+      const cfg = SHORTCUT_CONFIGS.find(c => c.storageKey === recordingKeybindKey);
+      keybindsStatus.textContent = `Recording for "${cfg ? cfg.label : recordingKeybindKey}" — press key combo (Esc to cancel).`;
+      keybindsStatus.className = "sg-keybinds-status";
+      return;
+    }
+    if (conflicts.size > 0) {
+      const firstEntry = conflicts.entries().next().value;
+      const firstCfg = SHORTCUT_CONFIGS.find(c => c.storageKey === firstEntry[0]);
+      keybindsStatus.textContent = `Conflict: ${firstCfg ? firstCfg.label : firstEntry[0]} overlaps with ${firstEntry[1].join(", ")}.`;
+      keybindsStatus.className = "sg-keybinds-status is-warn";
+      return;
+    }
+    keybindsStatus.textContent = "Click a keybind button and press your desired key combination.";
+    keybindsStatus.className = "sg-keybinds-status";
+  }
+
+  function renderKeybindsList() {
+    if (!keybindsList) return;
+    while (keybindsList.firstChild) {
+      keybindsList.removeChild(keybindsList.firstChild);
+    }
+
+    const q = keybindsSearch ? keybindsSearch.value.trim().toLowerCase() : "";
+    const conflicts = computeKeybindConflicts();
+    updateKeybindStatusBanner(conflicts);
+
+    let lastGroup = "";
+    let renderedCount = 0;
+
+    SHORTCUT_CONFIGS.forEach(cfg => {
+      const entry = shortcutState.get(cfg.storageKey);
+      const formatted = formatShortcutObj(entry.shortcut);
+      const hay = `${cfg.group} ${cfg.label} ${formatted}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+
+      if (cfg.group !== lastGroup) {
+        lastGroup = cfg.group;
+        const heading = document.createElement("div");
+        heading.className = "sg-kb-group-title";
+        heading.textContent = cfg.group;
+        keybindsList.appendChild(heading);
+      }
+
+      const row = document.createElement("div");
+      const conflictReasons = conflicts.get(cfg.storageKey);
+      row.className = `sg-kb-row${entry.enabled ? "" : " is-disabled"}${conflictReasons ? " is-conflict" : ""}`;
+      row.setAttribute("data-sg-kb-key", cfg.storageKey);
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "sg-kb-label";
+      labelEl.textContent = cfg.label;
+      labelEl.title = conflictReasons ? `${cfg.label} (Conflicts with ${conflictReasons.join(", ")})` : cfg.label;
+
+      const controls = document.createElement("div");
+      controls.className = "sg-kb-controls";
+
+      const isRec = recordingKeybindKey === cfg.storageKey;
+      const keyBtn = document.createElement("button");
+      keyBtn.type = "button";
+      keyBtn.className = `sg-kb-key-btn${isRec ? " is-recording" : ""}`;
+      keyBtn.textContent = isRec ? "Press keys…" : formatted;
+      keyBtn.title = "Click to record a new keybind";
+      keyBtn.setAttribute("data-sg-kb-record", cfg.storageKey);
+      keyBtn.addEventListener("click", () => {
+        transientKeybindStatus = null;
+        recordingKeybindKey = isRec ? null : cfg.storageKey;
+        renderKeybindsList();
+        if (recordingKeybindKey) {
+          const activeBtn = keybindsList.querySelector(`[data-sg-kb-record="${cfg.storageKey}"]`);
+          if (activeBtn && typeof activeBtn.focus === "function") activeBtn.focus();
+        }
+      });
+
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "sg-kb-reset-btn";
+      resetBtn.textContent = "↺";
+      resetBtn.title = `Reset to default (${formatShortcutObj(cfg.defaultShortcut)})`;
+      resetBtn.setAttribute("aria-label", `Reset ${cfg.label} shortcut`);
+      resetBtn.setAttribute("data-sg-kb-reset", cfg.storageKey);
+      resetBtn.addEventListener("click", () => {
+        transientKeybindStatus = null;
+        if (recordingKeybindKey === cfg.storageKey) recordingKeybindKey = null;
+        const defCombo = normalizeShortcutObj(null, cfg.defaultShortcut);
+        shortcutState.set(cfg.storageKey, { shortcut: defCombo, enabled: true });
+        chrome.storage.sync.set({
+          [cfg.storageKey]: defCombo,
+          [cfg.enabledKey]: true
+        });
+        renderKeybindsList();
+      });
+
+      const switchLbl = document.createElement("label");
+      switchLbl.className = "switch switch-sm";
+      switchLbl.title = entry.enabled ? "Disable keybind" : "Enable keybind";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = entry.enabled;
+      cb.setAttribute("aria-label", `Enable ${cfg.label} keybind`);
+      cb.setAttribute("data-sg-kb-toggle", cfg.storageKey);
+      cb.addEventListener("change", () => {
+        transientKeybindStatus = null;
+        entry.enabled = Boolean(cb.checked);
+        chrome.storage.sync.set({ [cfg.enabledKey]: entry.enabled });
+        renderKeybindsList();
+      });
+      const slider = document.createElement("span");
+      slider.className = "slider";
+      switchLbl.appendChild(cb);
+      switchLbl.appendChild(slider);
+
+      controls.appendChild(keyBtn);
+      controls.appendChild(resetBtn);
+      controls.appendChild(switchLbl);
+      row.appendChild(labelEl);
+      row.appendChild(controls);
+      keybindsList.appendChild(row);
+      renderedCount++;
+    });
+
+    if (renderedCount === 0) {
+      const empty = document.createElement("p");
+      empty.className = "sg-popup-no-results";
+      empty.textContent = "No matching keybinds";
+      keybindsList.appendChild(empty);
+    }
+  }
+
+  function closeKeybindsModal(restoreFocus = true) {
+    recordingKeybindKey = null;
+    transientKeybindStatus = null;
+    if (keybindsModal) keybindsModal.style.display = "none";
+    if (restoreFocus && openKeybindsBtn && openKeybindsBtn.isConnected && typeof openKeybindsBtn.focus === "function") {
+      try { openKeybindsBtn.focus(); } catch (_e) {}
+    }
+  }
+
+  function openKeybindsModal() {
+    if (!keybindsModal) return;
+    recordingKeybindKey = null;
+    transientKeybindStatus = null;
+    if (keybindsSearch) keybindsSearch.value = "";
+    renderKeybindsList();
+    keybindsModal.style.display = "flex";
+    if (keybindsSearch && typeof keybindsSearch.focus === "function") {
+      try { keybindsSearch.focus(); } catch (_e) {}
+    }
+  }
+
+  if (openKeybindsBtn && keybindsModal && keybindsList) {
+    openKeybindsBtn.addEventListener("click", openKeybindsModal);
+    if (keybindsCloseBtn) keybindsCloseBtn.addEventListener("click", () => closeKeybindsModal(true));
+    if (keybindsDoneBtn) keybindsDoneBtn.addEventListener("click", () => closeKeybindsModal(true));
+    if (keybindsSearch) keybindsSearch.addEventListener("input", renderKeybindsList);
+    if (keybindsResetAllBtn) {
+      keybindsResetAllBtn.addEventListener("click", () => {
+        recordingKeybindKey = null;
+        transientKeybindStatus = null;
+        const payload = {};
+        SHORTCUT_CONFIGS.forEach(cfg => {
+          const defCombo = normalizeShortcutObj(null, cfg.defaultShortcut);
+          shortcutState.set(cfg.storageKey, { shortcut: defCombo, enabled: true });
+          payload[cfg.storageKey] = defCombo;
+          payload[cfg.enabledKey] = true;
+        });
+        chrome.storage.sync.set(payload);
+        renderKeybindsList();
+      });
+    }
+    keybindsModal.addEventListener("click", e => {
+      if (e.target === keybindsModal) closeKeybindsModal(true);
+    });
+    document.addEventListener("keydown", e => {
+      if (keybindsModal.style.display !== "flex") return;
+      if (recordingKeybindKey) {
+        if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          recordingKeybindKey = null;
+          transientKeybindStatus = null;
+          renderKeybindsList();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        const parsed = extractRecordedShortcut(e);
+        if (!parsed) return;
+        if (parsed.error) {
+          transientKeybindStatus = { kind: "error", text: parsed.error };
+          renderKeybindsList();
+          return;
+        }
+        const activeKey = recordingKeybindKey;
+        const curEntry = shortcutState.get(activeKey);
+        if (curEntry) {
+          curEntry.shortcut = parsed.shortcut;
+        }
+        recordingKeybindKey = null;
+        transientKeybindStatus = null;
+        chrome.storage.sync.set({ [activeKey]: parsed.shortcut });
+        renderKeybindsList();
+        const savedBtn = keybindsList.querySelector(`[data-sg-kb-record="${activeKey}"]`);
+        if (savedBtn && typeof savedBtn.focus === "function") savedBtn.focus();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeKeybindsModal(true);
+      }
+    });
+  }
+
   // Single batched chrome.storage.sync.get for all popup settings (33 -> 1 IPC)
   const ALL_POPUP_SYNC_KEYS = [
     "extensionEnabled",
     ...toggleConfigs.map(cfg => cfg.storageKey),
     "driveSyncEnabled",
-    "optimizeModel"
+    "optimizeModel",
+    ...SHORTCUT_CONFIGS.flatMap(cfg => [cfg.storageKey, cfg.enabledKey])
   ];
   chrome.storage.sync.get(ALL_POPUP_SYNC_KEYS, res => {
     const safeRes = res || {};
@@ -424,6 +796,12 @@ document.addEventListener("DOMContentLoaded", () => {
     toggleHydrators.forEach(fn => fn(safeRes));
     if (driveSyncToggle) driveSyncToggle.checked = !!safeRes.driveSyncEnabled;
     if (hydrateOptimizeSeg) hydrateOptimizeSeg(safeRes);
+    SHORTCUT_CONFIGS.forEach(cfg => {
+      shortcutState.set(cfg.storageKey, {
+        shortcut: normalizeShortcutObj(safeRes[cfg.storageKey], cfg.defaultShortcut),
+        enabled: safeRes[cfg.enabledKey] !== false
+      });
+    });
     updateSettingsState(isEnabled);
   });
 

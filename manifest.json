@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gemini Power Suite | Personal Edition",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "minimum_chrome_version": "111",
   "description": "Personal productivity suite for Google Gemini: Folders, Message Queue, Prompt Library, Wide Mode, and Export.",
   "action": {
@@ -39,7 +39,26 @@
         "content.css"
       ],
       "js": [
-        "content.js"
+        "content/core-namespace.js",
+        "content/selectors.js",
+        "content/dispatcher.js",
+        "content/runtime-bus.js",
+        "content/legacy-core-export.js",
+        "content/legacy-composer-optimizer.js",
+        "content/legacy-queue-chains.js",
+        "content/legacy-sidebar-autohide.js",
+        "content/legacy-folders-prompts.js",
+        "content/legacy-pinned-drag-export.js",
+        "content/legacy-slash-drive.js",
+        "content/folder-uploader.js",
+        "content/skills-core.js",
+        "content/skills-migration-ui.js",
+        "content/outline-export.js",
+        "content/code-blocks.js",
+        "content/command-palette.js",
+        "content/orchestrator.js",
+        "content/periodic-table.js",
+        "content/diagram-renderer.js"
       ],
       "matches": [
         "https://gemini.google.com/*"
@@ -61,7 +80,8 @@
   "permissions": [
     "tabs",
     "storage",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
