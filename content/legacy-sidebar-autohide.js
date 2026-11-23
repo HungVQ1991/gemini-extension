@@ -548,26 +548,35 @@ let _sgSidebarEnterTimer = null;
 let _sgSidebarSensorEl = null;
 let _sgSidebarListenersBound = !1;
 let _sgCollapsedSidebarWidth = 53;
+let _sgCollapsedSidebarWidthDirty = !0;
+let _sgLastSidebarCollapsedState = null;
 let _sgSidebarMenuSpawned = !1;
 let _sgSidebarMenuOriginAt = 0;
 let _sgLastMouseX = null;
 
-function getCollapsedSidebarWidth() {
-  const sidenav = document.querySelector("bard-sidenav, side-navigation-v2, .sidenav-with-history-container");
-  if (sidenav) {
-    const w = sidenav.offsetWidth;
-    if (w > 30 && w < 120 && w !== _sgCollapsedSidebarWidth) {
-      _sgCollapsedSidebarWidth = w;
-      document.documentElement.style.setProperty("--sg-collapsed-sidebar-width", _sgCollapsedSidebarWidth + "px");
+function getCollapsedSidebarWidth(forceMeasure = !1) {
+  if (forceMeasure || _sgCollapsedSidebarWidthDirty) {
+    const sidenav = document.querySelector("bard-sidenav, side-navigation-v2, .sidenav-with-history-container");
+    if (sidenav) {
+      const w = sidenav.offsetWidth;
+      if (w > 30 && w < 120) {
+        _sgCollapsedSidebarWidthDirty = !1;
+        if (w !== _sgCollapsedSidebarWidth) {
+          _sgCollapsedSidebarWidth = w;
+          document.documentElement.style.setProperty("--sg-collapsed-sidebar-width", _sgCollapsedSidebarWidth + "px");
+        }
+      }
     }
   }
   return _sgCollapsedSidebarWidth;
 }
 
 function isGeminiSidebarCollapsed() {
+  const sidenav = document.querySelector(".sidenav-with-history-container");
+  if (sidenav && sidenav.classList.contains("collapsed")) return true;
   const app = document.querySelector("chat-app");
   if (app && app.classList.contains("side-nav-open")) return false;
-  const sidenav = document.querySelector(".sidenav-with-history-container");
+  if (app && document.querySelector("side-navigation-v2, bard-sidenav")) return true;
   if (sidenav && !sidenav.classList.contains("collapsed")) return false;
   return true;
 }
@@ -714,6 +723,11 @@ function reconcileSidebarHoverState() {
 
 function updateSidebarAutohideState() {
   if (autohideCollapsedSidebar) {
+    const collapsedNow = isGeminiSidebarCollapsed();
+    if (collapsedNow !== _sgLastSidebarCollapsedState) {
+      _sgLastSidebarCollapsedState = collapsedNow;
+      if (collapsedNow) _sgCollapsedSidebarWidthDirty = !0;
+    }
     getCollapsedSidebarWidth();
     document.body.classList.add("sg-autohide-collapsed-sidebar");
     ensureSidebarHoverSensor();
@@ -735,37 +749,16 @@ function updateSidebarAutohideState() {
 }
 
 function expandGeminiSidebar() {
-  const candidates = [
-    'button[data-test-id="side-nav-menu-button"]',
-    'button.main-menu-button',
-    'button[aria-label="Main menu"]',
-    'button[aria-label*="Main menu" i]',
-    'button[aria-label*="Open menu" i]',
-    'button[aria-label*="Expand menu" i]',
-    'button[aria-label*="Navigation menu" i]',
-    'button[aria-label*="Show menu" i]',
-    'button[aria-label*="Expand sidebar" i]',
-    'button[aria-label*="Toggle sidebar" i]',
-    'button[aria-label*="sidebar" i]',
-    'button[aria-label*="side panel" i]',
-    'button[aria-label*="thanh bên" i]',
-    'button[aria-label*="Mở trình đơn" i]',
-    'button[aria-label*="Trình đơn chính" i]',
-    'button.close-sidenav-button'
-  ];
-  const customExpandBtn = document.getElementById("sg-sidebar-expand-btn");
-  for (const sel of candidates) {
-    const el = document.querySelector(sel);
-    if (el && el !== customExpandBtn && !el.disabled) {
-      el.click();
-      setTimeout(updateSidebarAutohideState, 80);
-      return;
+  const targetBtn = typeof findSidebarToggleButton === "function" ? findSidebarToggleButton("expand") : null;
+  if (targetBtn && targetBtn.id !== "sg-sidebar-expand-btn") {
+    if (typeof sgToggleSidebarKeepFocus === "function") {
+      sgToggleSidebarKeepFocus(targetBtn);
+    } else {
+      targetBtn.click();
     }
-  }
-  const sparkleBtn = document.querySelector('button[data-test-id="side-nav-sparkle-button"]');
-  if (sparkleBtn && sparkleBtn !== customExpandBtn && !sparkleBtn.disabled) {
-    sparkleBtn.click();
-    setTimeout(updateSidebarAutohideState, 80);
+    setTimeout(() => {
+      updateSidebarAutohideState();
+    }, 80);
     return;
   }
   const app = document.querySelector("chat-app");
@@ -774,6 +767,40 @@ function expandGeminiSidebar() {
     const c = document.querySelector(".sidenav-with-history-container");
     if (c) c.classList.remove("collapsed");
     updateSidebarAutohideState();
+  }
+}
+
+function collapseGeminiSidebar() {
+  clearSidebarHoverEnterTimer();
+  clearSidebarHoverHideTimer();
+  document.body.classList.remove("sg-sidebar-hovered");
+  const targetBtn = typeof findSidebarToggleButton === "function" ? findSidebarToggleButton("collapse") : null;
+  if (targetBtn && targetBtn.id !== "sg-sidebar-expand-btn") {
+    if (typeof sgToggleSidebarKeepFocus === "function") {
+      sgToggleSidebarKeepFocus(targetBtn);
+    } else {
+      targetBtn.click();
+    }
+    setTimeout(() => {
+      clearSidebarHoverEnterTimer();
+      clearSidebarHoverHideTimer();
+      document.body.classList.remove("sg-sidebar-hovered");
+      updateSidebarAutohideState();
+    }, 80);
+    return;
+  }
+  const app = document.querySelector("chat-app");
+  if (app) app.classList.remove("side-nav-open");
+  const c = document.querySelector(".sidenav-with-history-container");
+  if (c) c.classList.add("collapsed");
+  updateSidebarAutohideState();
+}
+
+function toggleGeminiSidebar() {
+  if (isGeminiSidebarCollapsed()) {
+    expandGeminiSidebar();
+  } else {
+    collapseGeminiSidebar();
   }
 }
 
@@ -839,13 +866,22 @@ function injectSidebarExpandButton() {
     if (existing) existing.remove();
     const existingSvgs = document.querySelectorAll(".sg-built-in-expand-svg");
     existingSvgs.forEach(s => s.remove());
+    const modifiedSparkles = document.querySelectorAll('button[data-test-id="side-nav-sparkle-button"][data-sg-expand-labeled="1"]');
+    modifiedSparkles.forEach(btn => {
+      const origLabel = btn.getAttribute("data-sg-orig-aria-label") || "";
+      if (origLabel) btn.setAttribute("aria-label", origLabel);
+      else btn.removeAttribute("aria-label");
+      btn.removeAttribute("title");
+      btn.removeAttribute("data-sg-tooltip");
+      btn.removeAttribute("data-sg-expand-labeled");
+    });
     return;
   }
 
   const sidenav = document.querySelector("bard-sidenav, side-navigation-v2, .sidenav-with-history-container");
   if (!sidenav) return;
 
-  const expandLabel = sgIsVietnameseGeminiUI() ? "Mở thanh bên" : "Expand sidebar";
+  const expandLabel = sgIsVietnameseGeminiUI() ? "Mở thanh bên (Ctrl+B)" : "Expand sidebar (Ctrl+B)";
 
   // Clean any stray expand SVG accidentally injected into detached buttons outside the rail
   const detachedSparkle = document.querySelector('button[data-test-id="side-nav-sparkle-button"]');
@@ -860,6 +896,10 @@ function injectSidebarExpandButton() {
     const old = document.getElementById("sg-sidebar-expand-btn");
     if (old) old.remove();
 
+    if (!sparkleInRail.hasAttribute("data-sg-orig-aria-label")) {
+      sparkleInRail.setAttribute("data-sg-orig-aria-label", sparkleInRail.getAttribute("aria-label") || "");
+    }
+    sparkleInRail.setAttribute("data-sg-expand-labeled", "1");
     sparkleInRail.setAttribute("aria-label", expandLabel);
     sparkleInRail.setAttribute("title", expandLabel);
     sparkleInRail.setAttribute("data-sg-tooltip", expandLabel);
@@ -982,6 +1022,9 @@ function initSidebarAutohideListeners() {
   bindCollapsedSidenavHover();
   if (_sgSidebarListenersBound) return;
   _sgSidebarListenersBound = !0;
+  window.addEventListener("resize", () => {
+    _sgCollapsedSidebarWidthDirty = !0;
+  }, { passive: true });
 
   document.addEventListener("pointerdown", (e) => {
     if (!autohideCollapsedSidebar || !isGeminiSidebarCollapsed()) return;
@@ -1095,8 +1138,9 @@ sgObserverRegistry.registerUIRefresh("sidebarAutohide", () => {
   if (autohideCollapsedSidebar) {
     updateSidebarAutohideState();
     reconcileSidebarHoverState();
+  } else {
+    injectSidebarExpandButton();
   }
-  injectSidebarExpandButton();
 });
 
 /* ==========================================================================

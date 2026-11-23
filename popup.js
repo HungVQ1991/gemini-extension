@@ -25,12 +25,10 @@ function updateSettingsState(enabled) {
     }
   });
   if (enabled) {
-    const foldersToggle = document.getElementById("folders-toggle");
     const queueToggle = document.getElementById("queue-toggle");
     const menuToggle = document.getElementById("sidebar-dropdown-toggle");
     const menuOn = menuToggle ? menuToggle.checked : true;
     if (menuToggle) updateMenuDependentSettings(menuOn);
-    if (foldersToggle) updateTrashcanDependencyState(menuOn && foldersToggle.checked);
     if (queueToggle) updateQueueParamsState(queueToggle.checked);
     if (typeof window._sgApplyDriveSyncAvailability === "function") {
       window._sgApplyDriveSyncAvailability();
@@ -54,23 +52,6 @@ function updateMenuDependentSettings(enabled) {
       toggle.disabled = true;
     }
   });
-  if (foldersToggle) {
-    updateTrashcanDependencyState(enabled && foldersToggle.checked);
-  }
-}
-
-// Trashcan dependency on Folders
-function updateTrashcanDependencyState(foldersEnabled) {
-  const trashcanToggle = document.getElementById("trashcan-toggle");
-  if (!trashcanToggle) return;
-  const row = trashcanToggle.closest(".toggle-row");
-  if (foldersEnabled) {
-    row?.classList.remove("disabled");
-    trashcanToggle.disabled = false;
-  } else {
-    row?.classList.add("disabled");
-    trashcanToggle.disabled = true;
-  }
 }
 
 // Queue window dependency on Message Queue
@@ -275,8 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleConfigs = [
     // Menu & Folders
     { id: "sidebar-dropdown-toggle", storageKey: "sidebarDropdownEnabled", defaultOn: true, enableMsg: "ENABLE_SIDEBAR_DROPDOWN", disableMsg: "DISABLE_SIDEBAR_DROPDOWN", onChange: updateMenuDependentSettings },
-    { id: "folders-toggle", storageKey: "foldersEnabled", defaultOn: true, enableMsg: "ENABLE_FOLDERS", disableMsg: "DISABLE_FOLDERS", onChange: updateTrashcanDependencyState },
-    { id: "trashcan-toggle", storageKey: "trashcanEnabled", defaultOn: true, enableMsg: "ENABLE_TRASHCAN", disableMsg: "DISABLE_TRASHCAN" },
+    { id: "folders-toggle", storageKey: "foldersEnabled", defaultOn: true, enableMsg: "ENABLE_FOLDERS", disableMsg: "DISABLE_FOLDERS" },
     { id: "prompts-toggle", storageKey: "promptsEnabled", defaultOn: true, enableMsg: "ENABLE_PROMPTS", disableMsg: "DISABLE_PROMPTS" },
     { id: "skills-injection-toggle", storageKey: "skillsInjectionEnabled", defaultOn: false, enableMsg: "ENABLE_SKILLS_INJECTION", disableMsg: "DISABLE_SKILLS_INJECTION" },
     { id: "baseline-injection-toggle", storageKey: "baselineInjectionEnabled", defaultOn: false, enableMsg: "ENABLE_BASELINE_INJECTION", disableMsg: "DISABLE_BASELINE_INJECTION" },
@@ -478,7 +458,7 @@ document.addEventListener("DOMContentLoaded", () => {
     { group: "General & Navigation", label: "Open Folders", storageKey: "foldersShortcut", enabledKey: "foldersShortcutEnabled", defaultShortcut: { key: "f", alt: true, ctrl: false, shift: false, meta: false } },
     { group: "General & Navigation", label: "Open Prompts", storageKey: "promptsShortcut", enabledKey: "promptsShortcutEnabled", defaultShortcut: { key: "l", alt: true, ctrl: false, shift: false, meta: false } },
     { group: "General & Navigation", label: "Open Settings", storageKey: "settingsShortcut", enabledKey: "settingsShortcutEnabled", defaultShortcut: { key: "s", alt: true, ctrl: false, shift: false, meta: false } },
-    { group: "General & Navigation", label: "Toggle Sidebar", storageKey: "sidebarShortcut", enabledKey: "sidebarShortcutEnabled", defaultShortcut: { key: "q", alt: true, ctrl: false, shift: false, meta: false } },
+    { group: "General & Navigation", label: "Toggle Sidebar", storageKey: "sidebarShortcut", enabledKey: "sidebarShortcutEnabled", defaultShortcut: { key: "b", alt: false, ctrl: true, shift: false, meta: false } },
     { group: "General & Navigation", label: "New Chat", storageKey: "newchatShortcut", enabledKey: "newchatShortcutEnabled", defaultShortcut: { key: "n", alt: true, ctrl: true, shift: false, meta: false } },
     { group: "General & Navigation", label: "Temporary Chat", storageKey: "tempChatShortcut", enabledKey: "tempChatShortcutEnabled", defaultShortcut: { key: "a", alt: true, ctrl: false, shift: false, meta: false } },
     { group: "General & Navigation", label: "Saved Info", storageKey: "instructionsShortcut", enabledKey: "instructionsShortcutEnabled", defaultShortcut: { key: "i", alt: true, ctrl: true, shift: false, meta: false } },
@@ -847,8 +827,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (driveSyncToggle) driveSyncToggle.checked = !!safeRes.driveSyncEnabled;
     if (hydrateOptimizeSeg) hydrateOptimizeSeg(safeRes);
     SHORTCUT_CONFIGS.forEach(cfg => {
+      let rawSc = safeRes[cfg.storageKey];
+      if (cfg.storageKey === "sidebarShortcut" && rawSc && typeof rawSc === "object" && String(rawSc.key || "").toLowerCase() === "q" && rawSc.alt && !rawSc.ctrl && !rawSc.shift && !rawSc.meta) {
+        rawSc = cfg.defaultShortcut;
+      }
       shortcutState.set(cfg.storageKey, {
-        shortcut: normalizeShortcutObj(safeRes[cfg.storageKey], cfg.defaultShortcut),
+        shortcut: normalizeShortcutObj(rawSc, cfg.defaultShortcut),
         enabled: safeRes[cfg.enabledKey] !== false
       });
     });
@@ -1255,6 +1239,100 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         e.stopPropagation();
         closeDiagModal(true);
+      }
+    });
+  }
+
+  // Reset All Settings controller
+  const resetAllSettingsBtn = document.getElementById("reset-all-settings-btn");
+  const resetSettingsModal = document.getElementById("reset-settings-modal");
+  const resetSettingsCloseBtn = document.getElementById("reset-settings-close-btn");
+  const resetSettingsCancelBtn = document.getElementById("reset-settings-cancel-btn");
+  const resetSettingsConfirmBtn = document.getElementById("reset-settings-confirm-btn");
+
+  function buildDefaultSyncSettingsPayload() {
+    const payload = {
+      extensionEnabled: true,
+      optimizeModel: "lite",
+      gpsDropdownExpanded: true,
+      hideFolderedChats: false,
+      hideFolderedInChatsTab: false,
+      settingsInMenuEnabled: true
+    };
+    toggleConfigs.forEach(cfg => {
+      payload[cfg.storageKey] = Boolean(cfg.defaultOn);
+    });
+    SHORTCUT_CONFIGS.forEach(cfg => {
+      payload[cfg.storageKey] = normalizeShortcutObj(null, cfg.defaultShortcut);
+      payload[cfg.enabledKey] = true;
+    });
+    return payload;
+  }
+
+  function closeResetSettingsModal(restoreFocus = true) {
+    if (resetSettingsModal) resetSettingsModal.style.display = "none";
+    if (restoreFocus && resetAllSettingsBtn && resetAllSettingsBtn.isConnected && typeof resetAllSettingsBtn.focus === "function") {
+      try { resetAllSettingsBtn.focus(); } catch (_e) {}
+    }
+  }
+
+  function resetAllSettingsToDefaults() {
+    const wasDisabled = masterToggle && !masterToggle.checked;
+    const defaults = buildDefaultSyncSettingsPayload();
+    const keepDriveSync = Boolean(driveSyncToggle && driveSyncToggle.checked);
+    chrome.storage.sync.set(defaults);
+    if (chrome.storage.sync && typeof chrome.storage.sync.remove === "function") {
+      try {
+        chrome.storage.sync.remove([
+          "defaultModel",
+          "defaultReasoningEffort",
+          "tempChatModel",
+          "customOptimizePrompt",
+          "customFollowupPrompt"
+        ]);
+      } catch (_e) {}
+    }
+    hydratePopupUiFromMap({ ...defaults, driveSyncEnabled: keepDriveSync });
+    renderKeybindsList();
+    toggleConfigs.forEach(cfg => {
+      if (cfg.enableMsg && cfg.disableMsg) {
+        sendMessageToContentScript(cfg.defaultOn ? cfg.enableMsg : cfg.disableMsg);
+      }
+    });
+    if (wasDisabled) {
+      setMasterState(true);
+    }
+    if (resetAllSettingsBtn) {
+      resetAllSettingsBtn.textContent = "Reset \u2713";
+      setTimeout(() => {
+        if (resetAllSettingsBtn) resetAllSettingsBtn.textContent = "Reset to Default";
+      }, 1600);
+    }
+  }
+
+  if (resetAllSettingsBtn && resetSettingsModal) {
+    resetAllSettingsBtn.addEventListener("click", () => {
+      resetSettingsModal.style.display = "flex";
+      if (resetSettingsCancelBtn && typeof resetSettingsCancelBtn.focus === "function") {
+        try { resetSettingsCancelBtn.focus(); } catch (_e) {}
+      }
+    });
+    if (resetSettingsCloseBtn) resetSettingsCloseBtn.addEventListener("click", () => closeResetSettingsModal(true));
+    if (resetSettingsCancelBtn) resetSettingsCancelBtn.addEventListener("click", () => closeResetSettingsModal(true));
+    if (resetSettingsConfirmBtn) {
+      resetSettingsConfirmBtn.addEventListener("click", () => {
+        resetAllSettingsToDefaults();
+        closeResetSettingsModal(true);
+      });
+    }
+    resetSettingsModal.addEventListener("click", e => {
+      if (e.target === resetSettingsModal) closeResetSettingsModal(true);
+    });
+    document.addEventListener("keydown", e => {
+      if (resetSettingsModal.style.display === "flex" && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeResetSettingsModal(true);
       }
     });
   }

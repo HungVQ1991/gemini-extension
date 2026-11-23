@@ -489,10 +489,10 @@ function driveSyncFingerprintForKey(e, t) {
   const n = t || {};
   if (e === FOLDERS_STORAGE_KEY) return driveSyncFingerprint({
     folders: n.folders,
-    recycleBin: n.recycleBin,
+    recycleBin: [],
     permanentlyDeleted: n.permanentlyDeleted,
     permanentlyDeletedAt: n.permanentlyDeletedAt,
-    restoredFromBinAt: n.restoredFromBinAt,
+    restoredFromBinAt: {},
     deletedFolders: n.deletedFolders
   });
   if (e === PROMPTS_STORAGE_KEY) return driveSyncFingerprint({
@@ -521,18 +521,6 @@ function mergeFoldersData(e, t) {
     o = t || emptyFoldersData(),
     r = e => Array.isArray(e) ? e : [],
     s = Date.now(),
-    a = n.restoredFromBinAt && "object" == typeof n.restoredFromBinAt ? n.restoredFromBinAt : {},
-    i = o.restoredFromBinAt && "object" == typeof o.restoredFromBinAt ? o.restoredFromBinAt : {},
-    l = {};
-  for (const e of [...Object.keys(a), ...Object.keys(i)]) {
-    const t = Math.max(a[e] || 0, i[e] || 0);
-    t && ((!l[e] || t > l[e]) && (l[e] = t))
-  }
-  const c = e => {
-      if (!e) return 0;
-      const t = e.startsWith("c_") ? e.substring(2) : "c_" + e;
-      return Math.max(l[e] || 0, l[t] || 0)
-    },
     d = n.permanentlyDeletedAt && "object" == typeof n.permanentlyDeletedAt ? n.permanentlyDeletedAt : {},
     u = o.permanentlyDeletedAt && "object" == typeof o.permanentlyDeletedAt ? o.permanentlyDeletedAt : {},
     p = {};
@@ -540,7 +528,6 @@ function mergeFoldersData(e, t) {
     const t = Math.max(d[e] || 0, u[e] || 0) || s;
     (!p[e] || t > p[e]) && (p[e] = t)
   }
-  for (const e of Object.keys(p)) c(e) >= p[e] && delete p[e];
   const g = new Set(Object.keys(p).filter(e => s - p[e] < 2592e6)),
     m = new Map;
   for (const e of [...r(n.deletedFolders), ...r(o.deletedFolders)]) {
@@ -610,13 +597,6 @@ function mergeFoldersData(e, t) {
     };
   for (const e of h.keys()) v(e);
   for (const e of f.keys()) v(e);
-  const x = new Map;
-  for (const e of [...r(n.recycleBin), ...r(o.recycleBin)]) {
-    if (!e || !e.id || g.has(e.id)) continue;
-    if (c(e.id) >= (e.deletedAt || 0)) continue;
-    const t = x.get(e.id);
-    (!t || (e.deletedAt || 0) > (t.deletedAt || 0)) && x.set(e.id, e)
-  }
   const w = (e, t, n, o) => {
       const a = new Map;
       for (const e of [...r(n), ...r(o)]) {
@@ -731,17 +711,15 @@ function mergeFoldersData(e, t) {
         bookmarks: l,
         tombs: u
       }
-    })(),
-    T = {};
-  for (const e of Object.keys(l)) s - l[e] >= 2592e6 || (T[e] = l[e]);
+    })();
   const C = [];
   for (const e of m.values()) s - e.deletedAt >= 2592e6 || C.push(e);
   const A = {
     folders: y,
-    recycleBin: Array.from(x.values()),
+    recycleBin: [],
     permanentlyDeleted: Array.from(g),
     permanentlyDeletedAt: Object.fromEntries(Object.entries(p).filter(([e]) => g.has(e))),
-    restoredFromBinAt: T,
+    restoredFromBinAt: {},
     deletedFolders: C,
     prompts: S.items,
     deletedPrompts: S.tombs,
@@ -772,10 +750,10 @@ function driveSyncScheduleDebounced(e) {
 function driveSyncBuildPayload(e) {
   const t = {
       folders: Array.isArray(e.folders) ? e.folders : [],
-      recycleBin: Array.isArray(e.recycleBin) ? e.recycleBin : [],
+      recycleBin: [],
       permanentlyDeleted: Array.isArray(e.permanentlyDeleted) ? e.permanentlyDeleted : [],
       permanentlyDeletedAt: e.permanentlyDeletedAt && "object" == typeof e.permanentlyDeletedAt ? e.permanentlyDeletedAt : {},
-      restoredFromBinAt: e.restoredFromBinAt && "object" == typeof e.restoredFromBinAt ? e.restoredFromBinAt : {},
+      restoredFromBinAt: {},
       deletedFolders: Array.isArray(e.deletedFolders) ? e.deletedFolders : [],
       prompts: Array.isArray(e.prompts) ? e.prompts : [],
       deletedPrompts: Array.isArray(e.deletedPrompts) ? e.deletedPrompts : [],
@@ -893,10 +871,10 @@ async function driveSyncReRenderModalIfOpen() {
 async function driveSyncApplyMergedLocally(e) {
   const t = {
     folders: Array.isArray(e.folders) ? e.folders : [],
-    recycleBin: Array.isArray(e.recycleBin) ? e.recycleBin : [],
+    recycleBin: [],
     permanentlyDeleted: Array.isArray(e.permanentlyDeleted) ? e.permanentlyDeleted : [],
     permanentlyDeletedAt: e.permanentlyDeletedAt && "object" == typeof e.permanentlyDeletedAt ? e.permanentlyDeletedAt : {},
-    restoredFromBinAt: e.restoredFromBinAt && "object" == typeof e.restoredFromBinAt ? e.restoredFromBinAt : {},
+    restoredFromBinAt: {},
     deletedFolders: Array.isArray(e.deletedFolders) ? e.deletedFolders : []
   };
   for (const n of Object.keys(e)) n in t || "prompts" !== n && "deletedPrompts" !== n && "chains" !== n && "deletedChains" !== n && "bookmarks" !== n && "deletedBookmarks" !== n && (t[n] = e[n]);
@@ -1189,10 +1167,6 @@ async function initDriveSync() {
 SG_IS_SILENT_BG_WORKER_TAB || (sgSyncGetCached(["focusShortcut"], e => {
   Object.prototype.hasOwnProperty.call(e, "focusShortcut") && chrome.storage.sync.remove(["focusShortcut"])
 }), setTimeout(() => {
-  void 0 !== foldersData && sgSyncGetCached(["trashcanEnabled"], e => {
-    foldersData.trashcanEnabled = !1 !== e.trashcanEnabled
-  })
-}, 1e3), setTimeout(() => {
   try {
     sgSyncGetCached(["downloadAudioEnabled"], e => {
       !1 !== e.downloadAudioEnabled ? (isDownloadAudioEnabled = !0, "function" == typeof initDownloadAudio && initDownloadAudio()) : isDownloadAudioEnabled = !1

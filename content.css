@@ -2931,7 +2931,7 @@ body.sg-autohide-collapsed-sidebar chat-app:not(.side-nav-open) side-navigation-
   transform: translateX(-100%) !important;
   transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.22s ease !important;
   box-shadow: none !important;
-  background-color: var(--gem-sys-color--surface-container, #1e1f20) !important;
+  background-color: var(--gem-sys-color--surface, #131314) !important;
   border-right: 1px solid var(--gem-sys-color--outline-variant, rgba(255, 255, 255, 0.08)) !important;
   pointer-events: auto !important;
   overflow-x: hidden !important;
@@ -2989,8 +2989,35 @@ body.sg-autohide-collapsed-sidebar chat-app:not(.side-nav-open) side-navigation-
 /* Light mode overrides */
 body:not(.dark-theme).sg-autohide-collapsed-sidebar chat-app:not(.side-nav-open) bard-sidenav,
 body:not(.dark-theme).sg-autohide-collapsed-sidebar chat-app:not(.side-nav-open) side-navigation-v2 {
-  background-color: var(--gem-sys-color--surface-container, #f0f4f9) !important;
+  background-color: var(--gem-sys-color--surface, #ffffff) !important;
   border-right: 1px solid var(--gem-sys-color--outline-variant, rgba(0, 0, 0, 0.08)) !important;
+}
+
+/* Match sidebar surface color to main app background in both light and dark modes */
+body:not(.dark-theme) bard-sidenav,
+body:not(.dark-theme) side-navigation-v2,
+body:not(.dark-theme) .sidenav-with-history-container {
+  --gem-sys-color--surface-container: var(--gem-sys-color--surface, #ffffff);
+  --gem-sys-color--surface-container-low: var(--gem-sys-color--surface, #ffffff);
+  --bard-color-sidenav-background-desktop: var(--gem-sys-color--surface, #ffffff);
+  background-color: var(--gem-sys-color--surface, #ffffff) !important;
+}
+
+body.dark-theme bard-sidenav,
+body.dark-theme side-navigation-v2,
+body.dark-theme .sidenav-with-history-container {
+  --gem-sys-color--surface-container: var(--gem-sys-color--surface, #131314);
+  --gem-sys-color--surface-container-low: var(--gem-sys-color--surface, #131314);
+  --bard-color-sidenav-background-desktop: var(--gem-sys-color--surface, #131314);
+  background-color: var(--gem-sys-color--surface, #131314) !important;
+}
+
+body:not(.dark-theme) :is(bard-sidenav, side-navigation-v2) :is(mat-drawer, mat-sidenav, side-navigation-content, .sidenav-with-history-container, .sidenav-primary-container, .side-nav-container, .bottom-container) {
+  background-color: var(--gem-sys-color--surface, #ffffff) !important;
+}
+
+body.dark-theme :is(bard-sidenav, side-navigation-v2) :is(mat-drawer, mat-sidenav, side-navigation-content, .sidenav-with-history-container, .sidenav-primary-container, .side-nav-container, .bottom-container) {
+  background-color: var(--gem-sys-color--surface, #131314) !important;
 }
 
 /* Expand content area to fill screen */

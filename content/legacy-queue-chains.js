@@ -235,21 +235,50 @@ function sgBuildQueueDispatchPrompt(rawText, skills) {
   const skillList = Array.isArray(skills) ? skills.map(s => String(s || "").trim()).filter(Boolean) : [];
   if (skillList.length === 0) return cleaned;
 
+  let overrideSplit = null;
+  if (typeof sgParsePriorityOverride === "function") {
+    const parsed = sgParsePriorityOverride(cleaned);
+    if (parsed && parsed.hasOverride) {
+      const markerIdx = Number.isInteger(parsed.markerIndex) ? parsed.markerIndex : cleaned.lastIndexOf("//->");
+      if (markerIdx !== -1) {
+        overrideSplit = {
+          before: cleaned.slice(0, markerIdx),
+          after: cleaned.slice(markerIdx + 4).trimStart()
+        };
+      }
+    }
+  } else {
+    const markerIdx = cleaned.lastIndexOf("//->");
+    if (markerIdx !== -1) {
+      const afterCandidate = cleaned.slice(markerIdx + 4).trimStart();
+      if (afterCandidate.length > 0) {
+        overrideSplit = {
+          before: cleaned.slice(0, markerIdx),
+          after: afterCandidate
+        };
+      }
+    }
+  }
+
+  const scopeText = overrideSplit ? overrideSplit.after : cleaned;
+  const lowerScope = scopeText.toLowerCase();
   const available = sgGetQueueAvailableSkills();
   const byId = new Map(available.map(s => [s.id.toLowerCase(), s]));
   const missingTokens = [];
-  const lowerCleaned = cleaned.toLowerCase();
 
   for (const sid of skillList) {
     const sidLow = sid.toLowerCase();
     const meta = byId.get(sidLow);
-    const hasId = new RegExp(`(?:^|\\s)@${sidLow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "i").test(cleaned);
-    const hasAlias = Boolean(meta && meta.aliases.some(a => a && lowerCleaned.includes(String(a).toLowerCase())));
+    const hasId = new RegExp(`(?:^|\\s)@${sidLow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "i").test(scopeText);
+    const hasAlias = Boolean(meta && meta.aliases.some(a => a && lowerScope.includes(String(a).toLowerCase())));
     if (!hasId && !hasAlias) {
       missingTokens.push(`@${sid}`);
     }
   }
   if (missingTokens.length === 0) return cleaned;
+  if (overrideSplit) {
+    return `${overrideSplit.before}//-> ${missingTokens.join(" ")} ${overrideSplit.after}`.trim();
+  }
   return `${missingTokens.join(" ")} ${cleaned}`.trim();
 }
 
@@ -479,11 +508,144 @@ function tryEnqueueMessage(e) {
   return messageQueue.push(sgNormalizeQueueItem(e)), saveQueueToStorage(), updateQueueDisplay(), !0
 }
 
+let _sgQueueNativeAtSessionActive = false;
+
+function sgQueueIsPopupElVisible(el) {
+  if (!el || el.isConnected === false) return false;
+  if (el.hidden) return false;
+  if (typeof el.getAttribute === "function" && el.getAttribute("aria-hidden") === "true") return false;
+  if (el.style && (el.style.display === "none" || el.style.visibility === "hidden")) return false;
+  if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+    try {
+      const style = window.getComputedStyle(el);
+      if (style && (style.display === "none" || style.visibility === "hidden" || parseFloat(style.opacity) === 0)) {
+        return false;
+      }
+    } catch (_e) {}
+  }
+  if (typeof el.getBoundingClientRect === "function") {
+    try {
+      const rect = el.getBoundingClientRect();
+      if (rect && (rect.width <= 0 || rect.height <= 0)) return false;
+    } catch (_e) {}
+  }
+  return true;
+}
+
+function sgQueueIsNativeAutocompleteOpen(composer) {
+  if (typeof document === "undefined") return false;
+  if (composer && typeof composer.getAttribute === "function") {
+    if (composer.getAttribute("aria-expanded") === "true") return true;
+    const activeDesc = composer.getAttribute("aria-activedescendant");
+    if (activeDesc) {
+      const descEl = typeof document.getElementById === "function" ? document.getElementById(activeDesc) : null;
+      if (!descEl || sgQueueIsPopupElVisible(descEl)) return true;
+    }
+  }
+  if (typeof document.querySelectorAll !== "function") return false;
+
+  const panes = document.querySelectorAll(".cdk-overlay-pane");
+  for (const pane of panes) {
+    if (!sgQueueIsPopupElVisible(pane)) continue;
+    if (pane.classList && typeof pane.classList.contains === "function" && pane.classList.contains("mat-mdc-tooltip-panel")) {
+      continue;
+    }
+    const isTooltipOnly = Boolean(
+      typeof pane.querySelector === "function" &&
+      pane.querySelector('.mat-mdc-tooltip, mat-tooltip-component, [role="tooltip"]') &&
+      !pane.querySelector('[role="listbox"], [role="menu"], [role="option"], [role="menuitem"], mat-option, .mat-mdc-option')
+    );
+    if (isTooltipOnly) continue;
+    if (
+      typeof pane.querySelector !== "function" ||
+      pane.querySelector('[role="listbox"], [role="menu"], [role="option"], [role="menuitem"], mat-option, .mat-mdc-option, .mat-mdc-autocomplete-panel, .mat-autocomplete-panel, .mat-mdc-menu-panel, mat-menu-panel, gem-menu-item, button, li, [class*="mention"], [class*="autocomplete"], [class*="suggestion"]')
+    ) {
+      return true;
+    }
+  }
+
+  const inlineMenus = document.querySelectorAll(
+    '[role="listbox"]:not(#sg-skill-autocomplete):not(#sg-slash-menu), .mat-mdc-autocomplete-panel, .mat-autocomplete-panel, at-mentions-menu, mention-menu, skills-menu, extensions-menu, [class*="mention-menu"], [class*="mentions-menu"], [class*="at-mention"], [class*="autocomplete-panel"], [class*="suggestion-menu"], [class*="typeahead"]'
+  );
+  for (const menu of inlineMenus) {
+    if (sgQueueIsPopupElVisible(menu)) return true;
+  }
+  return false;
+}
+
+function sgQueueGetActiveAtToken(inputEl) {
+  let textBefore = null;
+  if (inputEl && (inputEl.tagName === "TEXTAREA" || inputEl.tagName === "INPUT")) {
+    const end = typeof inputEl.selectionStart === "number" ? inputEl.selectionStart : (inputEl.value || "").length;
+    textBefore = String(inputEl.value || "").slice(Math.max(0, end - 128), end);
+  } else if (inputEl && typeof window !== "undefined" && typeof window.getSelection === "function") {
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (range && range.endContainer && range.endContainer.nodeType === 3 && (typeof inputEl.contains !== "function" || inputEl.contains(range.endContainer))) {
+          const nodeText = String(range.endContainer.nodeValue || "").slice(0, range.endOffset);
+          if (nodeText.length === 0 || /[\s>@]/.test(nodeText)) {
+            textBefore = nodeText;
+          }
+        }
+      }
+    } catch (_e) {}
+  }
+  if (textBefore === null && typeof sgGetCaretTextBeforeCursor === "function") {
+    const caret = sgGetCaretTextBeforeCursor(inputEl);
+    if (caret && typeof caret.textBefore === "string") {
+      textBefore = caret.textBefore;
+    }
+  }
+  if (textBefore === null && inputEl) {
+    textBefore = String(extractInputText(inputEl) || "");
+  }
+  if (typeof textBefore !== "string") return null;
+  const m = textBefore.match(/(?:^|[\s>])(@([a-zA-Z0-9_.-]*))$/);
+  return m ? m[1] : null;
+}
+
 function handleQueueKeydown(e) {
   if (sgIsImeComposing(e)) return;
-  if ("Enter" === e.key && !e.shiftKey && isCurrentlyGenerating && isQueueingEnabled && !slashMenuVisible && ("undefined" == typeof sgSkillMenuVisible || !sgSkillMenuVisible)) {
-    e.preventDefault(), e.stopPropagation();
+  if ("Enter" !== e.key) {
+    if (!isCurrentlyGenerating || !isQueueingEnabled) {
+      _sgQueueNativeAtSessionActive = false;
+      return;
+    }
+    if ("Escape" === e.key || " " === e.key || "Tab" === e.key) {
+      _sgQueueNativeAtSessionActive = false;
+      return;
+    }
+    if (!_sgQueueNativeAtSessionActive && "@" !== e.key && "Backspace" !== e.key) {
+      return;
+    }
+    if ("@" === e.key) {
+      _sgQueueNativeAtSessionActive = true;
+      return;
+    }
     const t = document.querySelector(QUEUE_INPUT_SELECTOR);
+    const atToken = t ? sgQueueGetActiveAtToken(t) : null;
+    if (atToken && ("ArrowDown" === e.key || "ArrowUp" === e.key || "Backspace" === e.key || (!e.ctrlKey && !e.altKey && !e.metaKey && /^[a-zA-Z0-9_.-]$/.test(e.key)))) {
+      _sgQueueNativeAtSessionActive = true;
+    } else if (!atToken && typeof e.key === "string" && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      _sgQueueNativeAtSessionActive = false;
+    }
+    return;
+  }
+  if (!e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && isCurrentlyGenerating && isQueueingEnabled && !slashMenuVisible && ("undefined" == typeof sgSkillMenuVisible || !sgSkillMenuVisible)) {
+    const t = document.querySelector(QUEUE_INPUT_SELECTOR);
+    if (sgQueueIsNativeAutocompleteOpen(t)) {
+      _sgQueueNativeAtSessionActive = false;
+      return;
+    }
+    const activeAtToken = t ? sgQueueGetActiveAtToken(t) : null;
+    if ("@" === activeAtToken || (activeAtToken && _sgQueueNativeAtSessionActive)) {
+      _sgQueueNativeAtSessionActive = false;
+      return;
+    }
+    _sgQueueNativeAtSessionActive = false;
+    e.preventDefault(), e.stopPropagation();
     if (t) {
       const textVal = extractInputText(t).trim();
       if (textVal) {
@@ -622,6 +784,9 @@ async function sendNextQueuedMessage() {
         let o = 0;
         const s = () => {
           o++;
+          if ("undefined" != typeof _sgSkillBypassSend && _sgSkillBypassSend) {
+            if (o < 30) return void setTimeout(s, 100);
+          }
           const e = document.querySelector('[fonticon="stop"]'),
             t = document.querySelector(QUEUE_SEND_BUTTON_SELECTOR);
           e || !t || t.disabled ? (setTimeout(() => {
@@ -686,16 +851,6 @@ function handleRuntimeMessage(e) {
       isFoldersFeatureEnabled = !1;
       const o = document.getElementById("sg-folders-menu-item");
       o && (o.style.display = "none"), sgSetNativeMenuItemVisible("folders", !1), stopSidebarFilterWatchers();
-      break;
-    case "ENABLE_TRASHCAN":
-      void 0 !== foldersData && (foldersData.trashcanEnabled = !0);
-      const r = document.getElementById("sg-tab-recycle-bin");
-      r && (r.style.display = "block");
-      break;
-    case "DISABLE_TRASHCAN":
-      void 0 !== foldersData && (foldersData.trashcanEnabled = !1);
-      const s = document.getElementById("sg-tab-recycle-bin");
-      s && (s.style.display = "none");
       break;
     case "ENABLE_PROMPTS":
       isPromptsFeatureEnabled = !0;
@@ -1000,8 +1155,7 @@ function migrateLegacyStorageKeys() {
   return _gpsStorageMigrationPromise;
 }
 let foldersData = {
-    folders: [],
-    recycleBin: []
+    folders: []
   },
   promptsData = {
     prompts: [],
@@ -1064,10 +1218,9 @@ async function loadFoldersData() {
     await migrateLegacyStorageKeys();
     const e = await chrome.storage.local.get(FOLDERS_STORAGE_KEY);
     if (e[FOLDERS_STORAGE_KEY]) {
-      foldersData = e[FOLDERS_STORAGE_KEY], foldersData.recycleBin || (foldersData.recycleBin = []), foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.deletedFolders || (foldersData.deletedFolders = []), foldersData.permanentlyDeletedAt && "object" == typeof foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {});
+      foldersData = e[FOLDERS_STORAGE_KEY], delete foldersData.recycleBin, delete foldersData.restoredFromBinAt, foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.deletedFolders || (foldersData.deletedFolders = []), foldersData.permanentlyDeletedAt && "object" == typeof foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {});
       const t = Date.now();
-      for (const e of foldersData.permanentlyDeleted) "number" != typeof foldersData.permanentlyDeletedAt[e] && (foldersData.permanentlyDeletedAt[e] = t);
-      foldersData.restoredFromBinAt && "object" == typeof foldersData.restoredFromBinAt || (foldersData.restoredFromBinAt = {})
+      for (const e of foldersData.permanentlyDeleted) "number" != typeof foldersData.permanentlyDeletedAt[e] && (foldersData.permanentlyDeletedAt[e] = t)
     }
     const t = await loadPromptsData(),
       n = await loadChainsData();
@@ -1498,60 +1651,23 @@ async function renameFolder(e, t, n = null) {
   const o = foldersData.folders.find(t => t.id === e);
   o && (o.name = t.trim(), n && (o.color = n), o.lastModified = Date.now(), await saveFoldersData(), showFoldersModal(), showToast("Folder updated", "success"))
 }
-async function recycleChat(e, t, n = !1) {
-  const o = e.startsWith("c_") ? e.substring(2) : e,
-    r = [];
-  foldersData.folders.forEach(e => {
-    if (e.chats) {
-      e.chats.some(e => (e.id.startsWith("c_") ? e.id.substring(2) : e.id) === o) && r.push(e.id)
-    }
-  }), foldersData.folders.forEach(e => {
-    e.chats && (e.chats = e.chats.filter(e => (e.id.startsWith("c_") ? e.id.substring(2) : e.id) !== o))
-  });
-  const s = await sgSyncGetCached(["trashcanEnabled", "foldersEnabled"]);
-  if (!1 === s.trashcanEnabled || !1 === s.foldersEnabled) return;
-  foldersData.recycleBin || (foldersData.recycleBin = []);
-  if (foldersData.recycleBin.some(e => (e.id.startsWith("c_") ? e.id.substring(2) : e.id) === o) || foldersData.recycleBin.push({
-      id: o,
-      title: t,
-      type: "chat",
-      deletedAt: Date.now(),
-      originalFolderIds: r
-    }), applyHiddenChatsCSS(), await saveFoldersData(), applySidebarFiltering(), !n) {
-    const e = document.querySelector(".sg-folders-modal");
-    if (e) {
-      const t = e.querySelector("#sg-tab-recycle-bin")?.classList.contains("active"),
-        n = e.querySelector("#sg-tab-chats")?.classList.contains("active");
-      t ? e.querySelector("#sg-tab-recycle-bin")?.click() : n ? e.querySelector("#sg-tab-chats")?.click() : refreshFolderModal()
-    }
-  }
-  if (window.location.href.includes(o)) {
-    const e = document.querySelector('a[href="https://gemini.google.com/app"]') || document.querySelector('a[href="/app"]');
-    if (e) return void e.click();
-    const t = document.querySelector('a[data-test-id="expanded-button"][href="/app"]') || document.querySelector('a[href="/app"]') || document.querySelector('[data-test-id="new-chat-button"] a[href="/app"]') || document.querySelector('[aria-label="New chat"]') || document.querySelector('[aria-label="Create new chat"]');
-    if (t) return void t.click();
-    window.location.href = getAccountAwareUrl()
-  }
+function _sgNavigateToNewChat() {
+  const e = document.querySelector('a[href="https://gemini.google.com/app"]') || document.querySelector('a[href="/app"]');
+  if (e) return void e.click();
+  const t = document.querySelector('a[data-test-id="expanded-button"][href="/app"]') || document.querySelector('[data-test-id="new-chat-button"] a[href="/app"]') || document.querySelector('[aria-label="New chat"]') || document.querySelector('[aria-label="Create new chat"]');
+  if (t) return void t.click();
+  window.location.href = getAccountAwareUrl()
 }
-async function restoreChatFromBin(e) {
-  const t = e.startsWith("c_") ? e.substring(2) : e;
-  if (!foldersData.recycleBin) return;
-  const n = foldersData.recycleBin.find(e => (e.id.startsWith("c_") ? e.id.substring(2) : e.id) === t);
-  if (n && n.originalFolderIds && n.originalFolderIds.length > 0) {
-    const e = getAccountAwareUrl(t),
-      o = n.title || "Restored Chat";
-    for (const r of n.originalFolderIds) {
-      foldersData.folders.find(e => e.id === r) && await addChatToFolder(r, t, o, e, !0)
+async function _sgFinalizePermanentChatDeletion(e, n, t = !1) {
+  _sgSessionPermanentlyDeletedIds.add(n), Array.isArray(foldersData.folders) && foldersData.folders.forEach(t => {
+    if (t.chats) {
+      const r = t.chats.length;
+      t.chats = t.chats.filter(t => {
+        const o = t.id.startsWith("c_") ? t.id.substring(2) : t.id;
+        return o !== n && t.id !== e
+      }), t.chats.length !== r && (t.lastModified = Date.now())
     }
-  }
-  _sgSessionPermanentlyDeletedIds.delete(t), _sgSessionPermanentlyDeletedIds.delete("c_" + t), foldersData.recycleBin = foldersData.recycleBin.filter(e => (e.id.startsWith("c_") ? e.id.substring(2) : e.id) !== t), foldersData.permanentlyDeleted && (foldersData.permanentlyDeleted = foldersData.permanentlyDeleted.filter(e => (e.startsWith("c_") ? e.substring(2) : e) !== t || (foldersData.permanentlyDeletedAt && delete foldersData.permanentlyDeletedAt[e], !1))), foldersData.restoredFromBinAt && "object" == typeof foldersData.restoredFromBinAt || (foldersData.restoredFromBinAt = {});
-  const o = Date.now();
-  foldersData.restoredFromBinAt[t] = o, foldersData.restoredFromBinAt["c_" + t] = o, await saveFoldersData(), applySidebarFiltering();
-  const r = document.querySelector(".sg-folders-modal");
-  if (r) {
-    const e = r.querySelector("#sg-tab-recycle-bin");
-    e ? e.click() : (r.remove(), showFoldersModal())
-  }
+  }), delete foldersData.recycleBin, foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.permanentlyDeleted.includes(n) || (foldersData.permanentlyDeleted.push(n), foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {}), foldersData.permanentlyDeletedAt[n] = Date.now()), await saveFoldersData(), applySidebarFiltering(), !t && window.location.href.includes(n) && _sgNavigateToNewChat()
 }
 async function _sgDeleteChatViaApi(e) {
   const t = await _ucGetTokens(),
@@ -1578,24 +1694,18 @@ async function _sgDeleteChatViaApi(e) {
   const c = await l.text();
   if (!c.includes('"GzXR5e","[]"')) throw new Error("Unexpected response: " + c.slice(0, 200))
 }
-async function permanentlyDeleteChatFromBin(e, t = !1) {
+async function permanentlyDeleteChat(e, t = !1) {
   const n = e.startsWith("c_") ? e.substring(2) : e;
   try {
-    await _sgDeleteChatViaApi(n), _sgSessionPermanentlyDeletedIds.add(n), foldersData.recycleBin && (foldersData.recycleBin = foldersData.recycleBin.filter(t => t.id !== e && t.id !== n)), foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.permanentlyDeleted.includes(n) || (foldersData.permanentlyDeleted.push(n), foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {}), foldersData.permanentlyDeletedAt[n] = Date.now()), await saveFoldersData(), applySidebarFiltering();
-    const o = document.querySelector(".sg-folders-modal");
-    if (o) {
-      const e = o.querySelector("#sg-tab-recycle-bin")?.classList.contains("active");
-      e && o.querySelector("#sg-tab-recycle-bin")?.click()
-    }
-    return void(t || showToast("Chat permanently deleted", "success"))
+    return await _sgDeleteChatViaApi(n), await _sgFinalizePermanentChatDeletion(e, n, t), void(t || showToast("Chat permanently deleted", "success"))
   } catch (e) {
     console.warn("[Gemini Power Suite] API delete failed, falling back to UI flow:", e)
   }
-  window.sgForcedVisibleChatId = n, applySidebarFiltering(), window.sgIsRealDeleteInProgress = !0;
+  window.sgForcedVisibleChatId = n, applySidebarFiltering();
   const o = document.createElement("style");
   o.textContent = '\n    .cdk-overlay-container, [role="dialog"], .mat-mdc-dialog-container, .cdk-overlay-pane {\n      visibility: hidden !important;\n      opacity: 0 !important;\n      pointer-events: none !important;\n    }\n  ', document.head.appendChild(o);
   const r = () => {
-    window.sgIsRealDeleteInProgress = !1, window.sgForcedVisibleChatId = null, o.parentNode && o.remove(), applySidebarFiltering()
+    window.sgForcedVisibleChatId = null, o.parentNode && o.remove(), applySidebarFiltering()
   };
 
   function s(t) {
@@ -1630,8 +1740,7 @@ async function permanentlyDeleteChatFromBin(e, t = !1) {
         e.scrollTop = 0
       }
     }
-    if (!a || !i) return console.error("[Gemini Power Suite] Could not find sidebar row for native deletion ❌"), foldersData.recycleBin && (foldersData.recycleBin = foldersData.recycleBin.filter(t => t.id !== e && t.id !== n)), foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.permanentlyDeleted.includes(n) || (foldersData.permanentlyDeleted.push(n), foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {}), foldersData.permanentlyDeletedAt[n] = Date.now()), await saveFoldersData(), t || showToast("Chat not found in sidebar — removed from Recycle Bin. It may have been already deleted by Google.", "info"), void r();
-    i.style.display, a.style.display, i.style.visibility;
+    if (!a || !i) return console.error("[Gemini Power Suite] Could not find sidebar row for native deletion ❌"), await _sgFinalizePermanentChatDeletion(e, n, t), t || showToast("Chat not found in sidebar — it may have already been deleted by Google.", "info"), void r();
     i.style.display = "flex", i.style.visibility = "visible", a.style.display = "flex", a.style.visibility = "visible", a.scrollIntoView({
       block: "center",
       behavior: "instant"
@@ -1679,16 +1788,11 @@ async function permanentlyDeleteChatFromBin(e, t = !1) {
       const n = setInterval(() => {
         (!document.body.contains(a) || null === a.offsetParent || t > 30) && (clearInterval(n), e()), t++
       }, 200)
-    }), foldersData.recycleBin && (foldersData.recycleBin = foldersData.recycleBin.filter(t => t.id !== e && t.id !== n)), foldersData.permanentlyDeleted || (foldersData.permanentlyDeleted = []), foldersData.permanentlyDeleted.includes(n) || (foldersData.permanentlyDeleted.push(n), foldersData.permanentlyDeletedAt || (foldersData.permanentlyDeletedAt = {}), foldersData.permanentlyDeletedAt[n] = Date.now()), await saveFoldersData(), t || showToast("Chat permanently deleted", "success")
+    }), await _sgFinalizePermanentChatDeletion(e, n, t), t || showToast("Chat permanently deleted", "success")
   } catch (e) {
     console.error("[Gemini Power Suite] Error during native delete:", e), t || showToast("Failed to delete from Google: " + e.message, "error")
   } finally {
     r()
-  }
-  const a = document.querySelector(".sg-folders-modal");
-  if (a) {
-    const e = a.querySelector("#sg-tab-recycle-bin")?.classList.contains("active");
-    e && a.querySelector("#sg-tab-recycle-bin")?.click()
   }
 }
 async function addChatToFolder(e, t, n, o, r = !1, s = !1) {
@@ -2402,7 +2506,6 @@ const SG_SETTINGS_CHANGED_KEY = "sgSettingsChanged",
     hideActivity: !0,
     downloadAudioEnabled: !0,
     bookmarksEnabled: !0,
-    trashcanEnabled: !0,
     showQueueWindow: !0,
     hidePremadeGemsGallery: !1,
     hideGemsSidebarButton: !0,
@@ -2428,7 +2531,7 @@ const SG_SETTINGS_CHANGED_KEY = "sgSettingsChanged",
     canvasShortcut: "alt+c",
     videoShortcut: "alt+v",
     musicShortcut: "alt+m",
-    sidebarShortcut: "alt+q",
+    sidebarShortcut: "ctrl+b",
     instructionsShortcut: "ctrl+alt+i",
     newchatShortcut: "ctrl+alt+n",
     tempChatShortcut: "alt+a",

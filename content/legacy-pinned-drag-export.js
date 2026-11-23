@@ -188,9 +188,7 @@ function sgCollectPinnedChatIds() {
 
 function applyHiddenChatsCSS() {
   const e = new Set;
-  if (Array.isArray(foldersData.recycleBin) && foldersData.recycleBin.forEach(t => {
-      t && t.id && e.add(t.id)
-    }), _sgSessionPermanentlyDeletedIds.forEach(t => {
+  if (_sgSessionPermanentlyDeletedIds.forEach(t => {
       t && e.add(t)
     }), hideFolderedChats && Array.isArray(foldersData.folders)) {
     const t = sgCollectPinnedChatIds();
@@ -220,7 +218,7 @@ function applySidebarFiltering() {
   if (!e && !t) return;
   const n = new Set,
     permSet = new Set;
-  foldersData.recycleBin && foldersData.recycleBin.forEach(e => n.add(e.id)), foldersData.permanentlyDeleted && foldersData.permanentlyDeleted.forEach(e => {
+  foldersData.permanentlyDeleted && foldersData.permanentlyDeleted.forEach(e => {
     n.add(e);
     permSet.add(e);
   });
@@ -290,9 +288,7 @@ function applySearchPanelFiltering() {
   const e = document.querySelector(".search-window-container");
   if (!e) return;
   const t = new Set;
-  if (foldersData.recycleBin && foldersData.recycleBin.forEach(e => {
-      e.title && t.add(e.title)
-    }), hideFolderedChats && foldersData.folders) {
+  if (hideFolderedChats && foldersData.folders) {
     const e = sgCollectPinnedChatIds();
     foldersData.folders.forEach(n => {
       n.chats && n.chats.forEach(n => {

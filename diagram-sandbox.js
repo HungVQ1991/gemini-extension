@@ -242,6 +242,12 @@
       out: "OUT", y: "OUT", vo: "OUT", output: "OUT", vout: "OUT",
       vcc: "VCC", "v+": "VCC", vdd: "VCC", "vs+": "VCC", vpwr: "VCC",
       vee: "VEE", "v-": "VEE", vss: "VEE", "vs-": "VEE", vnwr: "VEE", gnd: "VEE"
+    }),
+    transformer: Object.freeze({
+      "l1.1": "L1.1", l1_1: "L1.1", l11: "L1.1", p1: "L1.1", pri1: "L1.1", pri_1: "L1.1", primary1: "L1.1", primary_1: "L1.1", "p+": "L1.1", pri_hi: "L1.1", in1: "L1.1", in_1: "L1.1", "in+": "L1.1", a1: "L1.1", "1": "L1.1",
+      "l1.2": "L1.2", l1_2: "L1.2", l12: "L1.2", p2: "L1.2", pri2: "L1.2", pri_2: "L1.2", primary2: "L1.2", primary_2: "L1.2", "p-": "L1.2", pri_lo: "L1.2", in2: "L1.2", in_2: "L1.2", "in-": "L1.2", a2: "L1.2", "2": "L1.2",
+      "l2.1": "L2.1", l2_1: "L2.1", l21: "L2.1", s1: "L2.1", sec1: "L2.1", sec_1: "L2.1", secondary1: "L2.1", secondary_1: "L2.1", "s+": "L2.1", sec_hi: "L2.1", out1: "L2.1", out_1: "L2.1", "out+": "L2.1", b1: "L2.1", "3": "L2.1",
+      "l2.2": "L2.2", l2_2: "L2.2", l22: "L2.2", s2: "L2.2", sec2: "L2.2", sec_2: "L2.2", secondary2: "L2.2", secondary_2: "L2.2", "s-": "L2.2", sec_lo: "L2.2", out2: "L2.2", out_2: "L2.2", "out-": "L2.2", b2: "L2.2", "4": "L2.2"
     })
   });
   const NETLIST_GND_NAME_RE = /^(?:gnd|ground|vss|vee|agnd|dgnd|pgnd|0v|com|return)(?:_.*)?$/i;
@@ -1971,6 +1977,7 @@
     if (/^(?:q_npn|q_pnp|transistor_npn|transistor_pnp)$/.test(cellTypeLower)) return "bjt";
     if (/^(?:nmos|q_nmos|mosfet_n|pmos|q_pmos|mosfet_p)$/.test(cellTypeLower)) return "mosfet";
     if (cellTypeLower === "opamp" || cellTypeLower === "op") return "opamp";
+    if (cellTypeLower === "transformer_1p_1s") return "transformer";
     return null;
   }
 
@@ -2048,6 +2055,20 @@
             usedTargets.delete(curTarget);
             usedTargets.add(fallbackTarget);
             renameMap.set(origPin, fallbackTarget);
+          }
+        }
+      } else if (family === "transformer" && origPins.length === 4) {
+        const canonicalPins = ["L1.1", "L1.2", "L2.1", "L2.2"];
+        if (!canonicalPins.every((cp) => usedTargets.has(cp))) {
+          for (const origPin of origPins) {
+            const curTarget = renameMap.get(origPin);
+            if (canonicalPins.includes(curTarget)) continue;
+            const fallbackTarget = canonicalPins.find((cp) => !usedTargets.has(cp)) || curTarget;
+            if (fallbackTarget !== curTarget) {
+              usedTargets.delete(curTarget);
+              usedTargets.add(fallbackTarget);
+              renameMap.set(origPin, fallbackTarget);
+            }
           }
         }
       }

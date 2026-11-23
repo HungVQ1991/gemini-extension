@@ -372,7 +372,7 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
     {
       id: "cmd_toggle_sidebar",
       title: "Toggle Sidebar",
-      subtitle: "Collapse or expand Gemini left navigation sidebar",
+      subtitle: "Collapse or expand Gemini left navigation sidebar (Ctrl+B)",
       searchText: "toggle sidebar navigation collapse expand",
       baseWeight: 20,
       commandId: "toggle_sidebar"
@@ -417,19 +417,19 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
   }
 
   // Prepare folders & chat title resolution map
-  const foldersObj = sources.foldersData || { folders: [], recycleBin: [], deletedFolders: [] };
+  const foldersObj = sources.foldersData || { folders: [], permanentlyDeleted: [], deletedFolders: [] };
   const allFolders = Array.isArray(foldersObj.folders) ? foldersObj.folders : [];
   const deletedFolderIds = new Set(
     (Array.isArray(foldersObj.deletedFolders) ? foldersObj.deletedFolders : [])
       .map((f) => (typeof f === "string" ? f : f && f.id))
       .filter(Boolean)
   );
-  const recycleBinIds = new Set();
-  for (const r of Array.isArray(foldersObj.recycleBin) ? foldersObj.recycleBin : []) {
-    const rid = typeof r === "string" ? r : r && r.id;
-    if (!rid) continue;
-    recycleBinIds.add(String(rid));
-    recycleBinIds.add(String(rid).replace(/^c_/, ""));
+  const permanentlyDeletedIds = new Set();
+  for (const p of Array.isArray(foldersObj.permanentlyDeleted) ? foldersObj.permanentlyDeleted : []) {
+    const pid = typeof p === "string" ? p : p && p.id;
+    if (!pid) continue;
+    permanentlyDeletedIds.add(String(pid));
+    permanentlyDeletedIds.add(String(pid).replace(/^c_/, ""));
   }
 
   const activeFolders = allFolders.filter((f) => f && f.id && !deletedFolderIds.has(f.id));
@@ -460,7 +460,7 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
       if (!ch || !ch.id) return false;
       const rawId = String(ch.id);
       const cleanId = rawId.replace(/^c_/, "");
-      return !recycleBinIds.has(rawId) && !recycleBinIds.has(cleanId);
+      return !permanentlyDeletedIds.has(rawId) && !permanentlyDeletedIds.has(cleanId);
     });
 
     entries.push({
@@ -502,7 +502,7 @@ function sgCollectCommandPaletteEntries(sources = {}, options = {}) {
   for (const sChat of Array.isArray(sources.sidebarChats) ? sources.sidebarChats : []) {
     if (!sChat || !sChat.id) continue;
     const cleanId = String(sChat.id).replace(/^c_/, "");
-    if (!cleanId || recycleBinIds.has(cleanId)) continue;
+    if (!cleanId || permanentlyDeletedIds.has(cleanId)) continue;
     const title = (sChat.title || "").trim() || cleanId;
     const url = sChat.url || sgBuildGeminiChatUrl(cleanId, originOverride, pathOverride);
     if (!chatTitleMap.has(cleanId)) {
@@ -707,7 +707,7 @@ async function sgLoadCommandPaletteSources() {
   }
 
   return {
-    foldersData: stored[FOLDERS_STORAGE_KEY] || (typeof foldersData !== "undefined" ? foldersData : { folders: [], recycleBin: [] }),
+    foldersData: stored[FOLDERS_STORAGE_KEY] || (typeof foldersData !== "undefined" ? foldersData : { folders: [] }),
     promptsData: stored[PROMPTS_STORAGE_KEY] || (typeof promptsData !== "undefined" ? promptsData : { prompts: [] }),
     chainsData: stored[CHAINS_STORAGE_KEY] || (typeof chainsData !== "undefined" ? chainsData : { chains: [] }),
     bookmarks: stored[SG_BOOKMARKS_STORAGE_KEY] || (typeof sgBuildBookmarksStored === "function" ? sgBuildBookmarksStored() : {}),
@@ -879,6 +879,10 @@ async function sgExecuteCommandPaletteEntry(entry) {
         }
         break;
       case "toggle_sidebar": {
+        if (typeof toggleGeminiSidebar === "function") {
+          toggleGeminiSidebar();
+          break;
+        }
         const toggleBtn = typeof findSidebarToggleButton === "function" ? findSidebarToggleButton() : null;
         if (toggleBtn && typeof sgToggleSidebarKeepFocus === "function") {
           sgToggleSidebarKeepFocus(toggleBtn);

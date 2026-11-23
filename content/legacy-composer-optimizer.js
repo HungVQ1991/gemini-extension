@@ -130,10 +130,9 @@ SG_IS_SILENT_BG_WORKER_TAB || sgSyncGetCached({
   hideGemsSidebarButton: !0,
   hideLocationInfo: !0,
   hideActivity: !0,
-  hideUpgradeButtons: !0,
-  trashcanEnabled: !0
+  hideUpgradeButtons: !0
 }, e => {
-  window.isTrashcanEnabled = !1 !== e.trashcanEnabled, isExtensionEnabled = !1 !== e.extensionEnabled, !1 !== e.extensionEnabled && (premadeGemsGalleryHidden = e.hidePremadeGemsGallery, premadeGemsButtonHidden = !1 !== e.hideGemsSidebarButton, hideLocationInfo = !1 !== e.hideLocationInfo, hideActivity = !1 !== e.hideActivity, (premadeGemsGalleryHidden || premadeGemsButtonHidden) && applyGemsHiding(), hideLocationInfo && applyLocationVisibility(), hideActivity && applyActivityVisibility(), !1 !== e.hideUpgradeButtons && document.body.classList.add("sg-hide-upgrade-buttons"), document.body ? document.body.classList.add("sg-hide-premade-gems") : (document.documentElement.classList.add("sg-hide-premade-gems"), window.addEventListener("DOMContentLoaded", () => document.body.classList.add("sg-hide-premade-gems"))))
+  isExtensionEnabled = !1 !== e.extensionEnabled, !1 !== e.extensionEnabled && (premadeGemsGalleryHidden = e.hidePremadeGemsGallery, premadeGemsButtonHidden = !1 !== e.hideGemsSidebarButton, hideLocationInfo = !1 !== e.hideLocationInfo, hideActivity = !1 !== e.hideActivity, (premadeGemsGalleryHidden || premadeGemsButtonHidden) && applyGemsHiding(), hideLocationInfo && applyLocationVisibility(), hideActivity && applyActivityVisibility(), !1 !== e.hideUpgradeButtons && document.body.classList.add("sg-hide-upgrade-buttons"), document.body ? document.body.classList.add("sg-hide-premade-gems") : (document.documentElement.classList.add("sg-hide-premade-gems"), window.addEventListener("DOMContentLoaded", () => document.body.classList.add("sg-hide-premade-gems"))))
 });
 let modelSwitchKeystrokeBuffer = "",
   modelSwitchKeystrokeListener = null;
@@ -1221,7 +1220,7 @@ function initWordCounter() {
     window.location.href !== window.lastSgUrl && (window.lastSgUrl = window.location.href, restoreOptimizeButton(), n && updateCounter(n.innerText || n.value || "")), n ? (n !== currentInputElement && t(n), scheduleComposerWidgetsPosition(), updateChatPlaceholder()) : (wordCounterElement && (wordCounterElement.style.display = "none"), currentInputElement = null)
   });
   const r = e.reduce((e, t) => e || document.querySelector(t), null);
-  r && t(r), bindComposerPosListeners(), sgObserverRegistry.registerUIRefresh("wordCounterPosition", scheduleComposerWidgetsPosition), document.addEventListener("click", e => {
+  r && t(r), bindComposerPosListeners(), document.addEventListener("click", e => {
     e.target.closest('.fullscreen-button, [aria-label*="Fullscreen"], [aria-label*="fullscreen"]') && (setTimeout(scheduleComposerWidgetsPosition, 100), setTimeout(scheduleComposerWidgetsPosition, 300))
   }, !0)
 }
@@ -2581,9 +2580,9 @@ function initOptimizePrompt() {
       meta: !1
     },
     a = {
-      key: "q",
-      alt: !0,
-      ctrl: !1,
+      key: "b",
+      alt: !1,
+      ctrl: !0,
       shift: !1,
       meta: !1
     },
@@ -2594,12 +2593,13 @@ function initOptimizePrompt() {
     u = !0,
     p = !0,
     g = !0;
+  const _sgIsLegacyAltQ = e => !!(e && "object" == typeof e && "q" === String(e.key || "").toLowerCase() && e.alt && !e.ctrl && !e.shift && !e.meta);
   sgSyncGetCached(["imageShortcut", "noToolShortcut", "deepResearchShortcut", "canvasShortcut", "videoShortcut", "musicShortcut", "sidebarShortcut", "imageShortcutEnabled", "noToolShortcutEnabled", "deepResearchShortcutEnabled", "canvasShortcutEnabled", "videoShortcutEnabled", "musicShortcutEnabled", "sidebarShortcutEnabled"], m => {
-    m.imageShortcut && (e = m.imageShortcut), m.noToolShortcut && (t = m.noToolShortcut), m.deepResearchShortcut && (n = m.deepResearchShortcut), m.canvasShortcut && (o = m.canvasShortcut), m.videoShortcut && (r = m.videoShortcut), m.musicShortcut && (s = m.musicShortcut), m.sidebarShortcut && (a = m.sidebarShortcut), void 0 !== m.imageShortcutEnabled && (i = m.imageShortcutEnabled), void 0 !== m.noToolShortcutEnabled && (l = m.noToolShortcutEnabled), void 0 !== m.deepResearchShortcutEnabled && (c = m.deepResearchShortcutEnabled), void 0 !== m.canvasShortcutEnabled && (d = m.canvasShortcutEnabled), void 0 !== m.videoShortcutEnabled && (u = m.videoShortcutEnabled), void 0 !== m.musicShortcutEnabled && (p = m.musicShortcutEnabled), void 0 !== m.sidebarShortcutEnabled && (g = m.sidebarShortcutEnabled)
+    m.imageShortcut && (e = m.imageShortcut), m.noToolShortcut && (t = m.noToolShortcut), m.deepResearchShortcut && (n = m.deepResearchShortcut), m.canvasShortcut && (o = m.canvasShortcut), m.videoShortcut && (r = m.videoShortcut), m.musicShortcut && (s = m.musicShortcut), m.sidebarShortcut && (_sgIsLegacyAltQ(m.sidebarShortcut) ? (a = { key: "b", alt: !1, ctrl: !0, shift: !1, meta: !1 }, "undefined" != typeof chrome && chrome.storage && chrome.storage.sync && chrome.storage.sync.set({ sidebarShortcut: a })) : a = m.sidebarShortcut), void 0 !== m.imageShortcutEnabled && (i = m.imageShortcutEnabled), void 0 !== m.noToolShortcutEnabled && (l = m.noToolShortcutEnabled), void 0 !== m.deepResearchShortcutEnabled && (c = m.deepResearchShortcutEnabled), void 0 !== m.canvasShortcutEnabled && (d = m.canvasShortcutEnabled), void 0 !== m.videoShortcutEnabled && (u = m.videoShortcutEnabled), void 0 !== m.musicShortcutEnabled && (p = m.musicShortcutEnabled), void 0 !== m.sidebarShortcutEnabled && (g = m.sidebarShortcutEnabled)
   });
   (() => {
     const _sgToolShortcutsChanged = (m, h) => {
-      "sync" === h && (m.imageShortcut && (e = m.imageShortcut.newValue || { key: "i", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.noToolShortcut && (t = m.noToolShortcut.newValue || { key: "n", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.deepResearchShortcut && (n = m.deepResearchShortcut.newValue || { key: "r", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.canvasShortcut && (o = m.canvasShortcut.newValue || { key: "c", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.videoShortcut && (r = m.videoShortcut.newValue || { key: "v", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.musicShortcut && (s = m.musicShortcut.newValue || { key: "m", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.sidebarShortcut && (a = m.sidebarShortcut.newValue || { key: "q", alt: !0, ctrl: !1, shift: !1, meta: !1 }), void 0 !== m.imageShortcutEnabled && (i = !1 !== m.imageShortcutEnabled.newValue), void 0 !== m.noToolShortcutEnabled && (l = !1 !== m.noToolShortcutEnabled.newValue), void 0 !== m.deepResearchShortcutEnabled && (c = !1 !== m.deepResearchShortcutEnabled.newValue), void 0 !== m.canvasShortcutEnabled && (d = !1 !== m.canvasShortcutEnabled.newValue), void 0 !== m.videoShortcutEnabled && (u = !1 !== m.videoShortcutEnabled.newValue), void 0 !== m.musicShortcutEnabled && (p = !1 !== m.musicShortcutEnabled.newValue), void 0 !== m.sidebarShortcutEnabled && (g = !1 !== m.sidebarShortcutEnabled.newValue))
+      "sync" === h && (m.imageShortcut && (e = m.imageShortcut.newValue || { key: "i", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.noToolShortcut && (t = m.noToolShortcut.newValue || { key: "n", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.deepResearchShortcut && (n = m.deepResearchShortcut.newValue || { key: "r", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.canvasShortcut && (o = m.canvasShortcut.newValue || { key: "c", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.videoShortcut && (r = m.videoShortcut.newValue || { key: "v", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.musicShortcut && (s = m.musicShortcut.newValue || { key: "m", alt: !0, ctrl: !1, shift: !1, meta: !1 }), m.sidebarShortcut && (a = m.sidebarShortcut.newValue || { key: "b", alt: !1, ctrl: !0, shift: !1, meta: !1 }), void 0 !== m.imageShortcutEnabled && (i = !1 !== m.imageShortcutEnabled.newValue), void 0 !== m.noToolShortcutEnabled && (l = !1 !== m.noToolShortcutEnabled.newValue), void 0 !== m.deepResearchShortcutEnabled && (c = !1 !== m.deepResearchShortcutEnabled.newValue), void 0 !== m.canvasShortcutEnabled && (d = !1 !== m.canvasShortcutEnabled.newValue), void 0 !== m.videoShortcutEnabled && (u = !1 !== m.videoShortcutEnabled.newValue), void 0 !== m.musicShortcutEnabled && (p = !1 !== m.musicShortcutEnabled.newValue), void 0 !== m.sidebarShortcutEnabled && (g = !1 !== m.sidebarShortcutEnabled.newValue))
     };
     if ("undefined" != typeof SG && SG.storage) {
       SG.storage.onChanged("legacy:tool-shortcuts-sync", _sgToolShortcutsChanged, { area: "sync" });
@@ -2634,13 +2634,15 @@ function initOptimizePrompt() {
           console.error("[Gemini Power Suite] Grammar fix error:", e), showToast("Grammar fix failed", "error")
         })) : void showToast("Nothing to fix - enter some text first", "error")
       }
-      if ((i && m(h, e) || l && m(h, t) || c && m(h, n) || d && m(h, o) || u && m(h, r) || p && m(h, s)) && (i && m(h, e) && (h.preventDefault(), selectToolDebounced("image")), l && m(h, t) && (h.preventDefault(), selectToolDebounced("none")), c && m(h, n) && (h.preventDefault(), selectToolDebounced("deep-research")), d && m(h, o) && (h.preventDefault(), selectToolDebounced("canvas")), u && m(h, r) && (h.preventDefault(), selectToolDebounced("video")), p && m(h, s) && (h.preventDefault(), selectToolDebounced("music"))), g && m(h, a)) {
-        h.preventDefault();
+      if ((i && m(h, e) || l && m(h, t) || c && m(h, n) || d && m(h, o) || u && m(h, r) || p && m(h, s)) && (i && m(h, e) && (h.preventDefault(), selectToolDebounced("image")), l && m(h, t) && (h.preventDefault(), selectToolDebounced("none")), c && m(h, n) && (h.preventDefault(), selectToolDebounced("deep-research")), d && m(h, o) && (h.preventDefault(), selectToolDebounced("canvas")), u && m(h, r) && (h.preventDefault(), selectToolDebounced("video")), p && m(h, s) && (h.preventDefault(), selectToolDebounced("music"))), g && (m(h, a) || h.ctrlKey && !h.altKey && !h.shiftKey && !h.metaKey && ("b" === (h.key || "").toLowerCase() || "KeyB" === h.code))) {
+        h.preventDefault(), h.stopPropagation();
         const e = Date.now();
         if (e - lastSidebarToggleTime < 100) return;
-        lastSidebarToggleTime = e;
-        const t = findSidebarToggleButton();
-        t && sgToggleSidebarKeepFocus(t)
+        if (lastSidebarToggleTime = e, "function" == typeof toggleGeminiSidebar) toggleGeminiSidebar();
+        else {
+          const t = findSidebarToggleButton();
+          t && sgToggleSidebarKeepFocus(t)
+        }
       }
       if (isExtensionEnabled) {
         if (isFoldersShortcutEnabled && matchesShortcut(h, foldersShortcut)) {

@@ -152,21 +152,103 @@ function sgRafCoalesceRecords(e) {
   }
 }
 
-function findSidebarToggleButton() {
-  const e = document.querySelector('button[data-test-id="side-nav-menu-button"], button.main-menu-button, button[aria-label="Main menu"], button[aria-label*="Main menu" i], button[aria-label*="Open menu" i], button[aria-label*="Expand menu" i], button[aria-label*="Navigation menu" i], button[aria-label*="Toggle sidebar" i], button[aria-label*="Expand sidebar" i], button[aria-label*="Collapse sidebar" i], button[aria-label*="thanh bên" i], button[aria-label*="Trình đơn chính" i]');
-  if (e) return e;
-  const t = e => {
-      for (const t of document.querySelectorAll(e))
-        if (null !== t.offsetParent && !t.disabled) return t;
-      return null
-    },
-    n = t("button.close-sidenav-button, .close-sidenav-button button");
-  if (n) return n;
-  const o = t('button[data-test-id="side-nav-sparkle-button"]');
-  if (o) return o;
-  const s = document.getElementById("sg-sidebar-expand-btn");
-  if (s && !s.disabled) return s;
-  return null
+function isValidSidebarToggleCandidate(el, customExpandBtn, sparkleBtn) {
+  if (!el || el === customExpandBtn || el === sparkleBtn || el.disabled) return !1;
+  if ("true" === el.getAttribute("aria-disabled")) return !1;
+  const hasPopup = el.getAttribute("aria-haspopup");
+  if ("menu" === hasPopup || "true" === hasPopup || "listbox" === hasPopup || "dialog" === hasPopup) return !1;
+  if (el.classList && (el.classList.contains("mat-mdc-menu-trigger") || el.classList.contains("overflow-menu-button"))) return !1;
+  if (el.hasAttribute("matmenutriggerfor") || el.hasAttribute("mat-menu-trigger-for")) return !1;
+  if ("function" == typeof el.closest && el.closest(
+    'top-bar-actions, [data-test-id="conversation-actions"], conversation-actions, share-and-export, ' +
+    'message-actions, response-actions, user-query, model-response, input-area-v2, rich-textarea, ' +
+    'conversations-list, [data-test-id="conversation"], .conversation-items-container, ' +
+    '[data-test-id="new-chat-button"], .new-chat-container, temp-chat-button, ' +
+    'button[data-test-id="search-button"], .cdk-overlay-pane, [role="dialog"], [id^="sg-"]'
+  )) return !1;
+  return !0;
+}
+
+function findSidebarToggleButton(mode) {
+  const e = document.getElementById("sg-sidebar-expand-btn"),
+    t = document.querySelector('button[data-test-id="side-nav-sparkle-button"]'),
+    isCollapsed = "expand" === mode || ("collapse" !== mode && ("function" != typeof isGeminiSidebarCollapsed || isGeminiSidebarCollapsed())),
+    expandPrimary = [
+      'button[data-test-id="side-nav-menu-button"]',
+      '[data-test-id="side-nav-menu-button"] button',
+      "side-nav-menu-button button",
+      ".side-nav-menu-button button",
+      "button.side-nav-menu-button",
+      ".side-nav-button-container button",
+      "button.main-menu-button",
+      ".main-menu-button button",
+      'button[aria-label="Main menu" i]',
+      'button[aria-label="Trình đơn chính" i]',
+      'button[aria-label*="Main menu" i]',
+      'button[aria-label*="Trình đơn chính" i]',
+      'button[aria-label*="Expand sidebar" i]',
+      'button[aria-label*="Toggle sidebar" i]',
+      'button[aria-label*="Navigation menu" i]',
+      'button[aria-label*="Mở thanh bên" i]'
+    ],
+    collapsePrimary = [
+      'button[data-test-id="side-nav-menu-button"]',
+      '[data-test-id="side-nav-menu-button"] button',
+      "side-nav-menu-button button",
+      ".side-nav-menu-button button",
+      "button.side-nav-menu-button",
+      "button.close-sidenav-button",
+      ".close-sidenav-button button",
+      "close-sidenav-button button",
+      ".side-nav-button-container button",
+      "button.main-menu-button",
+      ".main-menu-button button",
+      'button[aria-label*="Collapse sidebar" i]',
+      'button[aria-label*="Collapse menu" i]',
+      'button[aria-label*="Close sidebar" i]',
+      'button[aria-label*="Close menu" i]',
+      'button[aria-label*="Thu gọn thanh bên" i]',
+      'button[aria-label*="Đóng thanh bên" i]',
+      'button[aria-label*="Ẩn thanh bên" i]',
+      'button[aria-label*="Đóng trình đơn" i]',
+      'button[aria-label*="Thu gọn" i]',
+      'button[aria-label="Main menu" i]',
+      'button[aria-label="Trình đơn chính" i]',
+      'button[aria-label*="Main menu" i]',
+      'button[aria-label*="Trình đơn chính" i]',
+      'button[aria-label*="Toggle sidebar" i]',
+      'button[aria-label*="Navigation menu" i]',
+      'button[aria-label*="thanh bên" i]'
+    ],
+    primaryList = isCollapsed ? expandPrimary : collapsePrimary;
+
+  for (const sel of primaryList) {
+    const list = document.querySelectorAll(sel);
+    let r = null;
+    for (const cand of list)
+      if (isValidSidebarToggleCandidate(cand, e, t)) {
+        if (null !== cand.offsetParent) return cand;
+        r || (r = cand);
+      }
+    if (r) return r;
+  }
+
+  if (isCollapsed && t && !t.disabled) {
+    if (null !== t.offsetParent) return t;
+  }
+
+  if (isCollapsed) {
+    for (const sel of collapsePrimary) {
+      const list = document.querySelectorAll(sel);
+      for (const cand of list)
+        if (isValidSidebarToggleCandidate(cand, e, t) && null !== cand.offsetParent) return cand;
+    }
+    if (t && !t.disabled) return t;
+    if (e && !e.disabled) return e;
+  } else if (t && null !== t.offsetParent && !t.disabled) {
+    return t;
+  }
+  return null;
 }
 
 function sgToggleSidebarKeepFocus(e) {
@@ -174,7 +256,7 @@ function sgToggleSidebarKeepFocus(e) {
     n = ["cdk-focused", "cdk-program-focused", "cdk-keyboard-focused", "cdk-mouse-focused", "cdk-touch-focused"],
     o = e => {
       const o = e.target;
-      o instanceof Element && o.closest('.close-sidenav-button, [data-test-id="side-nav-sparkle-button"], button[data-test-id="side-nav-menu-button"], button.main-menu-button, #sg-sidebar-expand-btn') && (a(), setTimeout(() => {
+      o instanceof Element && o.closest('.close-sidenav-button, close-sidenav-button, [data-test-id="side-nav-sparkle-button"], [data-test-id="side-nav-menu-button"], side-nav-menu-button, .side-nav-menu-button, .side-nav-button-container, button.main-menu-button, #sg-sidebar-expand-btn') && (a(), setTimeout(() => {
         t && t !== document.body && t.isConnected && t !== o && t.getClientRects().length > 0 ? t.focus({
           preventScroll: !0
         }) : o.blur(), o.classList.remove(...n), r(0)
@@ -1463,9 +1545,7 @@ function enableArrowNavigation(e, t, n) {
 }
 (() => {
   const _sgLegacyAudioBookmarksMsg = e => {
-    if ("ENABLE_TRASHCAN" === e.type) window.isTrashcanEnabled = !0;
-    else if ("DISABLE_TRASHCAN" === e.type) window.isTrashcanEnabled = !1;
-    else if ("ENABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !0, initDownloadAudio();
+    if ("ENABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !0, initDownloadAudio();
     else if ("DISABLE_DOWNLOAD_AUDIO" === e.type) isDownloadAudioEnabled = !1, removeAllDownloadAudioButtons(), downloadAudioObserver && (downloadAudioObserver.disconnect(), downloadAudioObserver = null);
     else if ("ENABLE_BOOKMARKS" === e.type) isBookmarksEnabled = !0, sgLoadBookmarks().then(() => {
       initBookmarks(), sgApplyAllBookmarkStates(), sgRefreshBookmarksHeaderButton()
