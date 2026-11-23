@@ -328,14 +328,42 @@ function _sgRunNavTickCallbacks() {
   } catch (e) {}
 }
 
+function _sgStopNavTickInterval() {
+  _sgNavTickInterval && (clearInterval(_sgNavTickInterval), _sgNavTickInterval = null);
+}
+
+function _sgStartNavTickInterval() {
+  if (_sgNavTickInterval || SG_IS_SILENT_BG_WORKER_TAB) return;
+  if ("undefined" != typeof document && document.hidden && ("undefined" == typeof sgObserverRegistry || !sgObserverRegistry._hasActiveBgWork())) return;
+  _sgNavTickInterval = setInterval(() => {
+    if ("undefined" != typeof document && document.hidden && ("undefined" == typeof sgObserverRegistry || !sgObserverRegistry._hasActiveBgWork())) {
+      _sgStopNavTickInterval();
+      return;
+    }
+    _sgRunNavTickCallbacks()
+  }, 500);
+}
+
 function sgRegisterNavTick(e) {
   if (SG_IS_SILENT_BG_WORKER_TAB) return;
-  "function" == typeof e && (_sgNavTickCallbacks.add(e), _sgNavTickVisBound || (_sgNavTickVisBound = !0, "undefined" != typeof document && "function" == typeof document.addEventListener && document.addEventListener("visibilitychange", () => {
-    document.hidden || _sgRunNavTickCallbacks()
-  })), _sgNavTickInterval || (_sgNavTickInterval = setInterval(() => {
-    if ("undefined" != typeof document && document.hidden && !sgObserverRegistry._hasActiveBgWork()) return;
-    _sgRunNavTickCallbacks()
-  }, 500)))
+  if ("function" != typeof e) return;
+  _sgNavTickCallbacks.add(e);
+  if (!_sgNavTickVisBound) {
+    _sgNavTickVisBound = !0;
+    "undefined" != typeof document && "function" == typeof document.addEventListener && document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        ("undefined" == typeof sgObserverRegistry || !sgObserverRegistry._hasActiveBgWork()) && _sgStopNavTickInterval();
+      } else {
+        _sgRunNavTickCallbacks();
+        _sgStartNavTickInterval();
+      }
+    });
+    "undefined" != typeof window && "function" == typeof window.addEventListener && (
+      window.addEventListener("popstate", _sgRunNavTickCallbacks),
+      window.addEventListener("hashchange", _sgRunNavTickCallbacks)
+    );
+  }
+  _sgStartNavTickInterval();
 }
 sgRegisterNavTick(() => {
   checkForNavigation(), checkWideChatNavigation()
@@ -580,17 +608,32 @@ function _ucUpdateDisplay(e) {
   d("sg-uc-five-pct") && (d("sg-uc-five-pct").textContent = i), d("sg-uc-five-reset") && (d("sg-uc-five-reset").textContent = s), d("sg-uc-week-pct") && (d("sg-uc-week-pct").textContent = c), d("sg-uc-week-reset") && (d("sg-uc-week-reset").textContent = e.weekReset ? _ucFmtDuration(1e3 * e.weekReset - n) : "—"), d("sg-uc-refreshed") && (d("sg-uc-refreshed").textContent = _ucFmtRefreshed(e.fetchedAt))
 }
 
+function _ucStartRefreshTimers() {
+  _ucRefreshTimer || (_ucRefreshTimer = setInterval(() => {
+    document.hidden || _ucFetch()
+  }, 12e4));
+  _ucExpanded && !_ucRefreshedTickTimer && (_ucRefreshedTickTimer = setInterval(() => {
+    _ucLastParsed && _ucUpdateDisplay(_ucLastParsed)
+  }, 3e4));
+}
+
+function _ucStopRefreshTimers() {
+  _ucRefreshTimer && (clearInterval(_ucRefreshTimer), _ucRefreshTimer = null);
+  _ucRefreshedTickTimer && (clearInterval(_ucRefreshedTickTimer), _ucRefreshedTickTimer = null);
+}
+
 function _ucToggleExpanded(e) {
   if (!dailyPromptCounterElement) return;
-  (void 0 !== e ? e : !dailyPromptCounterElement.classList.contains("sg-uc--expanded")) ? (dailyPromptCounterElement.classList.remove("sg-uc--collapsing"), dailyPromptCounterElement.classList.add("sg-uc--expanded"), _ucExpanded = !0, _ucFetch(!0), _ucRefreshedTickTimer || (_ucRefreshedTickTimer = setInterval(() => {
+  (void 0 !== e ? e : !dailyPromptCounterElement.classList.contains("sg-uc--expanded")) ? (dailyPromptCounterElement.classList.remove("sg-uc--collapsing"), dailyPromptCounterElement.classList.add("sg-uc--expanded"), _ucExpanded = !0, _ucFetch(!0), ("undefined" == typeof document || !document.hidden) && (_ucRefreshedTickTimer || (_ucRefreshedTickTimer = setInterval(() => {
     _ucLastParsed && _ucUpdateDisplay(_ucLastParsed)
-  }, 3e4))) : (dailyPromptCounterElement.classList.add("sg-uc--collapsing"), setTimeout(() => {
+  }, 3e4)))) : (dailyPromptCounterElement.classList.add("sg-uc--collapsing"), setTimeout(() => {
     dailyPromptCounterElement && (dailyPromptCounterElement.classList.remove("sg-uc--expanded"), dailyPromptCounterElement.classList.remove("sg-uc--collapsing"))
   }, 200), _ucExpanded = !1, _ucRefreshedTickTimer && (clearInterval(_ucRefreshedTickTimer), _ucRefreshedTickTimer = null))
 }
 
 let _ucListenersBound = !1;
 function initDailyPromptCounter() {
+  if (SG_IS_SILENT_BG_WORKER_TAB) return;
   sgSyncGetCached(["dailyCounterVisible", "usageCounterShowPct", "usageCounterShowTime"], e => {
     isDailyCounterVisible = !1 !== e.dailyCounterVisible, _ucShowPct = !1 !== e.usageCounterShowPct, _ucShowTime = !0 === e.usageCounterShowTime, updateCounterPosition(), _ucLastParsed && _ucUpdateDisplay(_ucLastParsed)
   });
@@ -620,14 +663,18 @@ function initDailyPromptCounter() {
     } else if ("undefined" != typeof chrome && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener(_sgUcMsg);
     }
+    "undefined" != typeof document && "function" == typeof document.addEventListener && document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        _ucStopRefreshTimers();
+      } else {
+        _ucStartRefreshTimers();
+        Date.now() - _ucLastFetch >= 12e4 ? _ucFetch() : (_ucExpanded && _ucLastParsed && _ucUpdateDisplay(_ucLastParsed));
+      }
+    });
   }
   initDailyCounterElement(), setTimeout(() => {
     document.hidden || _ucFetch(!0)
-  }, 500), _ucRefreshTimer || (_ucRefreshTimer = setInterval(() => {
-    document.hidden || _ucFetch()
-  }, 12e4), document.addEventListener("visibilitychange", () => {
-    !document.hidden && Date.now() - _ucLastFetch >= 12e4 && _ucFetch()
-  })), sgRegisterNavTick(() => {
+  }, 500), document.hidden || _ucStartRefreshTimers(), sgRegisterNavTick(() => {
     location.pathname !== _ucLastPathname && (_ucLastPathname = location.pathname, _ucLastFetch = 0, _ucFetch())
   })
 }

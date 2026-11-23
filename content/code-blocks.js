@@ -981,10 +981,14 @@ function sgTeardownCodeBlockActions() {
     delete cb.dataset.sgCbLen;
     delete cb.dataset.sgCbIdx;
   }
+  if (typeof _sgSettledCodeBlocks !== "undefined") {
+    _sgSettledCodeBlocks = new WeakSet();
+  }
 }
 
 let _sgCodeBlockLastCount = -1;
 let _sgCodeBlockRefreshTimer = null;
+let _sgSettledCodeBlocks = new WeakSet();
 
 function sgScheduleCodeBlockActionsRefresh() {
   if (!isExtensionEnabled || !isCodeBlockActionsEnabled || _sgCodeBlockRefreshTimer) return;
@@ -1003,17 +1007,28 @@ function sgRefreshCodeBlockActions() {
     return;
   }
 
+  const responses = document.querySelectorAll("model-response");
+  const lastResponse = responses && responses.length > 0 ? responses[responses.length - 1] : null;
+
   let dirty = nodes.length !== _sgCodeBlockLastCount;
   if (!dirty) {
     let validIdx = 0;
     for (const cb of nodes) {
       if (typeof cb.closest === "function" && cb.closest('[id^="sg-"]')) continue;
+      const mr = typeof cb.closest === "function" ? cb.closest("model-response") : null;
+      if (mr && lastResponse && mr !== lastResponse && _sgSettledCodeBlocks.has(cb) && cb.isConnected && cb.dataset && cb.dataset.sgCbIdx === String(validIdx)) {
+        validIdx++;
+        continue;
+      }
       const preCode = cb.querySelector("pre code") || cb.querySelector("pre") || cb.querySelector("code");
       const raw = preCode ? String(preCode.textContent || "") : "";
       const curLen = raw.includes("\r") ? raw.replace(/\r\n/g, "\n").length : raw.length;
       if (!cb.dataset || cb.dataset.sgCbLen !== String(curLen) || cb.dataset.sgCbIdx !== String(validIdx) || !cb.querySelector(".sg-cb-actions")) {
         dirty = true;
         break;
+      }
+      if (mr && lastResponse && mr !== lastResponse && cb.isConnected) {
+        _sgSettledCodeBlocks.add(cb);
       }
       validIdx++;
     }
@@ -1026,10 +1041,16 @@ function sgRefreshCodeBlockActions() {
     const el = item.element;
     const lenStr = String(item.codeText ? item.codeText.length : 0);
     const idxStr = String(item.index);
+    const mr = el && typeof el.closest === "function" ? el.closest("model-response") : null;
+    const isOlder = Boolean(mr && lastResponse && mr !== lastResponse && el.isConnected);
     if (el && el.dataset && el.dataset.sgCbLen === lenStr && el.dataset.sgCbIdx === idxStr && el.querySelector && el.querySelector(".sg-cb-actions")) {
+      if (isOlder) _sgSettledCodeBlocks.add(el);
       continue;
     }
     sgEnhanceCodeBlock(el, item, allItems);
+    if (isOlder && el.querySelector && el.querySelector(".sg-cb-actions")) {
+      _sgSettledCodeBlocks.add(el);
+    }
   }
 }
 

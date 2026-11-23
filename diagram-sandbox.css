@@ -127,3 +127,18 @@ body.sg-sb-dark .sg-engine-netlist svg {
 body.sg-sb-dark .sg-engine-dot svg text {
   fill: #e8eaed;
 }
+
+.sg-engine-mermaid svg .node rect,
+.sg-engine-mermaid svg .node polygon,
+.sg-engine-mermaid svg .node circle,
+.sg-engine-mermaid svg .node ellipse,
+.sg-engine-mermaid svg .node path,
+.sg-engine-mermaid svg .node .outer-path,
+.sg-engine-mermaid svg .cluster rect,
+.sg-engine-mermaid svg .statediagram-cluster rect,
+.sg-engine-mermaid svg .actor,
+.sg-engine-mermaid svg .icon,
+.sg-engine-mermaid svg .icon-neo path,
+.sg-engine-mermaid svg .tag-label-bkg {
+  filter: none !important;
+}

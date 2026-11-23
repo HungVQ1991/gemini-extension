@@ -257,6 +257,7 @@
   let _currentSvgEl = null;
   let _currentCanvasEl = null;
   let _renderSeq = 0;
+  let _renderGen = 0;
 
   let _scale = 1;
   let _panX = 0;
@@ -666,6 +667,724 @@
     }
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const SVG_MATH_SYMBOLS = Object.freeze({
+    alpha: "\u03B1", beta: "\u03B2", gamma: "\u03B3", delta: "\u03B4", epsilon: "\u03F5",
+    varepsilon: "\u03B5", zeta: "\u03B6", eta: "\u03B7", theta: "\u03B8", vartheta: "\u03D1",
+    iota: "\u03B9", kappa: "\u03BA", lambda: "\u03BB", mu: "\u03BC", nu: "\u03BD",
+    xi: "\u03BE", omicron: "\u03BF", pi: "\u03C0", varpi: "\u03D6", rho: "\u03C1",
+    varrho: "\u03F1", sigma: "\u03C3", varsigma: "\u03C2", tau: "\u03C4", upsilon: "\u03C5",
+    phi: "\u03D5", varphi: "\u03C6", chi: "\u03C7", psi: "\u03C8", omega: "\u03C9",
+    Gamma: "\u0393", Delta: "\u0394", Theta: "\u0398", Lambda: "\u039B", Xi: "\u039E",
+    Pi: "\u03A0", Sigma: "\u03A3", Upsilon: "\u03A5", Phi: "\u03A6", Psi: "\u03A8", Omega: "\u03A9",
+    cdot: "\u00B7", times: "\u00D7", pm: "\u00B1", mp: "\u2213", approx: "\u2248",
+    neq: "\u2260", ne: "\u2260", leq: "\u2264", le: "\u2264", geq: "\u2265", ge: "\u2265",
+    infty: "\u221E", partial: "\u2202", nabla: "\u2207", oint: "\u222E", int: "\u222B",
+    sum: "\u2211", prod: "\u220F", sqrt: "\u221A", to: "\u2192", rightarrow: "\u2192",
+    leftarrow: "\u2190", leftrightarrow: "\u2194", implies: "\u21D2", Rightarrow: "\u21D2",
+    perp: "\u22A5", parallel: "\u2225", degree: "\u00B0", circ: "\u2218", propto: "\u221D", equiv: "\u2261"
+  });
+  const SVG_MATH_ACCENTS = Object.freeze({
+    bar: "\u0304",
+    hat: "\u0302"
+  });
+  const SVG_MATH_YOSYS_PREFIX_RE = /^\$(?:and|or|xor|xnor|not|mux|pmux|dff|add|sub|eq|lt|le|ge|gt|abc|auto|procdff|paramod|_)/;
+  const SVG_MATH_SINGLE_TOKEN_RE = /^(?:\d+(?:\.\d+)?|(?:[A-Za-z]|\\[A-Za-z]+)(?:[_^](?:\{[^{}]*\}|\\[A-Za-z]+|[A-Za-z0-9]))*|\\(?:vec|bar|hat)\{(?:[A-Za-z]|\\[A-Za-z]+)\}(?:[_^](?:\{[^{}]*\}|\\[A-Za-z]+|[A-Za-z0-9]))*|\\(?:text|mathrm)\{[^\s{}]+\}|\\sqrt\{[^{}]*\})$/;
+  const SVG_MATH_SKIP_TAGS = new Set(["style", "script", "title", "desc", "defs"]);
+  const SVG_MATH_SUPERSCRIPT_MAP = Object.freeze({
+    "0": "\u2070", "1": "\u00B9", "2": "\u00B2", "3": "\u00B3", "4": "\u2074",
+    "5": "\u2075", "6": "\u2076", "7": "\u2077", "8": "\u2078", "9": "\u2079",
+    "+": "\u207A", "-": "\u207B", "=": "\u207C", "(": "\u207D", ")": "\u207E",
+    n: "\u207F", i: "\u2071"
+  });
+  const SVG_MATH_SUBSCRIPT_MAP = Object.freeze({
+    "0": "\u2080", "1": "\u2081", "2": "\u2082", "3": "\u2083", "4": "\u2084",
+    "5": "\u2085", "6": "\u2086", "7": "\u2087", "8": "\u2088", "9": "\u2089",
+    "+": "\u208A", "-": "\u208B", "=": "\u208C", "(": "\u208D", ")": "\u208E",
+    a: "\u2090", e: "\u2091", h: "\u2095", i: "\u1D62", j: "\u2C7C",
+    k: "\u2096", l: "\u2097", m: "\u2098", n: "\u2099", o: "\u2092",
+    p: "\u209A", r: "\u1D63", s: "\u209B", t: "\u209C", u: "\u1D64",
+    v: "\u1D65", x: "\u2093"
+  });
+
+  function pushMathSegment(out, kind, text, bold = false) {
+    if (!text) return;
+    const isBold = Boolean(bold);
+    if (out.length > 0 && out[out.length - 1].kind === kind && Boolean(out[out.length - 1].bold) === isBold) {
+      out[out.length - 1].text += text;
+    } else {
+      out.push({ kind, text, bold: isBold });
+    }
+  }
+
+  function buildBraceMatchMap(str) {
+    const map = new Map();
+    const stack = [];
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === "{") stack.push(i);
+      else if (ch === "}" && stack.length > 0) {
+        map.set(stack.pop(), i);
+      }
+    }
+    return map;
+  }
+
+  function readBracedMathGroup(str, startIdx, braceMap = null) {
+    if (startIdx >= str.length || str[startIdx] !== "{") return null;
+    if (braceMap) {
+      const endIdx = braceMap.get(startIdx);
+      return endIdx !== undefined ? { content: str.slice(startIdx + 1, endIdx), nextIdx: endIdx + 1 } : null;
+    }
+    let depth = 0;
+    for (let i = startIdx; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          return { content: str.slice(startIdx + 1, i), nextIdx: i + 1 };
+        }
+      }
+    }
+    return null;
+  }
+
+  function readMathArgument(str, startIdx, braceMap = null) {
+    let p = startIdx;
+    while (p < str.length && /\s/.test(str[p])) p += 1;
+    if (p >= str.length) return null;
+    if (str[p] === "{") {
+      return readBracedMathGroup(str, p, braceMap);
+    }
+    if (str[p] === "\\") {
+      if (p + 1 < str.length && /[A-Za-z]/.test(str[p + 1])) {
+        let end = p + 2;
+        while (end < str.length && /[A-Za-z]/.test(str[end])) end += 1;
+        return { content: str.slice(p, end), nextIdx: end };
+      }
+      return { content: str.slice(p, Math.min(str.length, p + 2)), nextIdx: Math.min(str.length, p + 2) };
+    }
+    return { content: str[p], nextIdx: p + 1 };
+  }
+
+  function isBalancedParenWrapped(s) {
+    if (!s.startsWith("(") || !s.endsWith(")")) return false;
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "(") depth += 1;
+      else if (s[i] === ")") {
+        depth -= 1;
+        if (depth === 0 && i < s.length - 1) return false;
+        if (depth < 0) return false;
+      }
+    }
+    return depth === 0;
+  }
+
+  function needsInlineMathParens(rawArg) {
+    const s = String(rawArg || "").trim();
+    if (!s || isBalancedParenWrapped(s) || SVG_MATH_SINGLE_TOKEN_RE.test(s)) return false;
+    return true;
+  }
+
+  function latexFragmentToPlainText(fragment, depth) {
+    const tmp = [];
+    parseLatexMathSegments(fragment, tmp, depth + 1);
+    return tmp.map((seg) => seg.text).join("");
+  }
+
+  function parseLatexMathSegments(expr, out, depth = 0) {
+    if (depth > 8) {
+      pushMathSegment(out, "text", expr);
+      return;
+    }
+    const braceMap = expr.includes("{") ? buildBraceMatchMap(expr) : null;
+    let i = 0;
+    while (i < expr.length) {
+      const ch = expr[i];
+      if (ch === "\\") {
+        if (i + 1 >= expr.length) {
+          pushMathSegment(out, "text", "\\");
+          break;
+        }
+        if (/[A-Za-z]/.test(expr[i + 1])) {
+          let cmdEnd = i + 2;
+          while (cmdEnd < expr.length && /[A-Za-z]/.test(expr[cmdEnd])) cmdEnd += 1;
+          const cmd = expr.slice(i + 1, cmdEnd);
+          let p = cmdEnd;
+          while (p < expr.length && /\s/.test(expr[p])) p += 1;
+          if (cmd === "text" || cmd === "mathrm") {
+            if (p < expr.length && expr[p] === "{") {
+              const grp = readBracedMathGroup(expr, p, braceMap);
+              if (grp) {
+                pushMathSegment(out, "text", grp.content.replace(/\\([${}%])/g, "$1"));
+                i = grp.nextIdx;
+                continue;
+              }
+            }
+          }
+          if (cmd === "vec") {
+            const arg = readMathArgument(expr, cmdEnd, braceMap);
+            if (arg) {
+              const vecSegs = [];
+              parseLatexMathSegments(arg.content, vecSegs, depth + 1);
+              for (const seg of vecSegs) {
+                pushMathSegment(out, seg.kind, seg.text, true);
+              }
+              i = arg.nextIdx;
+              continue;
+            }
+          }
+          if (Object.prototype.hasOwnProperty.call(SVG_MATH_ACCENTS, cmd)) {
+            const arg = readMathArgument(expr, cmdEnd, braceMap);
+            if (arg) {
+              const base = latexFragmentToPlainText(arg.content, depth);
+              pushMathSegment(out, "text", base + SVG_MATH_ACCENTS[cmd]);
+              i = arg.nextIdx;
+              continue;
+            }
+          }
+          if (cmd === "frac") {
+            const numArg = readMathArgument(expr, cmdEnd, braceMap);
+            const denArg = numArg ? readMathArgument(expr, numArg.nextIdx, braceMap) : null;
+            if (numArg && denArg) {
+              const wrapNum = needsInlineMathParens(numArg.content);
+              const wrapDen = needsInlineMathParens(denArg.content);
+              if (wrapNum) pushMathSegment(out, "text", "(");
+              parseLatexMathSegments(numArg.content, out, depth + 1);
+              if (wrapNum) pushMathSegment(out, "text", ")");
+              pushMathSegment(out, "text", "/");
+              if (wrapDen) pushMathSegment(out, "text", "(");
+              parseLatexMathSegments(denArg.content, out, depth + 1);
+              if (wrapDen) pushMathSegment(out, "text", ")");
+              i = denArg.nextIdx;
+              continue;
+            }
+          }
+          if (cmd === "sqrt") {
+            if (p < expr.length && expr[p] === "{") {
+              const radArg = readBracedMathGroup(expr, p, braceMap);
+              if (radArg) {
+                const wrapRad = needsInlineMathParens(radArg.content);
+                pushMathSegment(out, "text", "\u221A");
+                if (wrapRad) pushMathSegment(out, "text", "(");
+                parseLatexMathSegments(radArg.content, out, depth + 1);
+                if (wrapRad) pushMathSegment(out, "text", ")");
+                i = radArg.nextIdx;
+                continue;
+              }
+            }
+            pushMathSegment(out, "text", "\u221A");
+            i = cmdEnd;
+            continue;
+          }
+          if (cmd === "left" || cmd === "right") {
+            i = p < expr.length && expr[p] === "." ? p + 1 : cmdEnd;
+            continue;
+          }
+          if (Object.prototype.hasOwnProperty.call(SVG_MATH_SYMBOLS, cmd)) {
+            pushMathSegment(out, "text", SVG_MATH_SYMBOLS[cmd]);
+            i = cmdEnd;
+            continue;
+          }
+          pushMathSegment(out, "text", "\\" + cmd);
+          i = cmdEnd;
+          continue;
+        }
+        const esc = expr[i + 1];
+        if (esc === "$" || esc === "%" || esc === "{" || esc === "}") {
+          pushMathSegment(out, "text", esc);
+        } else if (esc === "," || esc === ";" || esc === ":" || esc === " " || esc === "\\") {
+          pushMathSegment(out, "text", " ");
+        } else if (esc !== "!") {
+          pushMathSegment(out, "text", "\\" + esc);
+        }
+        i += 2;
+        continue;
+      }
+      if (ch === "^" || ch === "_") {
+        const arg = readMathArgument(expr, i + 1, braceMap);
+        if (arg) {
+          const scriptKind = ch === "^" ? "super" : "sub";
+          const scriptSegs = [];
+          parseLatexMathSegments(arg.content, scriptSegs, depth + 1);
+          for (const seg of scriptSegs) {
+            pushMathSegment(out, scriptKind, seg.text, seg.bold);
+          }
+          i = arg.nextIdx;
+          continue;
+        }
+        pushMathSegment(out, "text", ch);
+        i += 1;
+        continue;
+      }
+      if (ch === "{") {
+        const grp = readBracedMathGroup(expr, i, braceMap);
+        if (grp) {
+          parseLatexMathSegments(grp.content, out, depth + 1);
+          i = grp.nextIdx;
+          continue;
+        }
+        pushMathSegment(out, "text", "{");
+        i += 1;
+        continue;
+      }
+      pushMathSegment(out, "text", ch);
+      i += 1;
+    }
+  }
+
+  function parseInlineMathText(rawText, stopAtQuote = false, preserveEscapedDollar = false) {
+    const segments = [];
+    let i = 0;
+    let changed = false;
+    let failParenBefore = -1;
+    let failBracketBefore = -1;
+    while (i < rawText.length) {
+      if (rawText[i] === "\\" && i + 1 < rawText.length && rawText[i + 1] === "\\") {
+        pushMathSegment(segments, "text", "\\\\");
+        i += 2;
+        continue;
+      }
+      if (rawText[i] === "\\" && i + 1 < rawText.length && rawText[i + 1] === "$") {
+        if (preserveEscapedDollar) {
+          pushMathSegment(segments, "text", "\\$");
+        } else {
+          pushMathSegment(segments, "text", "$");
+          changed = true;
+        }
+        i += 2;
+        continue;
+      }
+      if (rawText[i] === "\\" && i + 1 < rawText.length && (rawText[i + 1] === "(" || rawText[i + 1] === "[")) {
+        const isParen = rawText[i + 1] === "(";
+        const closeChar = isParen ? ")" : "]";
+        const failBefore = isParen ? failParenBefore : failBracketBefore;
+        let closeIdx = -1;
+        if (i >= failBefore) {
+          let limit = rawText.length;
+          for (let j = i + 2; j < rawText.length - 1; j++) {
+            if (rawText[j] === "\\") {
+              if (rawText[j + 1] === closeChar) {
+                closeIdx = j;
+                break;
+              }
+              j += 1;
+            } else if (stopAtQuote && rawText[j] === '"') {
+              limit = j;
+              break;
+            }
+          }
+          if (closeIdx === -1) {
+            if (isParen) failParenBefore = limit;
+            else failBracketBefore = limit;
+          }
+        }
+        if (closeIdx > i + 2) {
+          const inner = rawText.slice(i + 2, closeIdx);
+          if (inner.trim().length > 0) {
+            parseLatexMathSegments(inner, segments, 0);
+            changed = true;
+            i = closeIdx + 2;
+            continue;
+          }
+        }
+        pushMathSegment(segments, "text", rawText.slice(i, i + 2));
+        i += 2;
+        continue;
+      }
+      if (rawText[i] === "$") {
+        if (i + 1 < rawText.length && rawText[i + 1] !== "$" && !/\s/.test(rawText[i + 1])) {
+          let closeIdx = -1;
+          for (let j = i + 1; j < rawText.length; j++) {
+            if (rawText[j] === "\\") {
+              j += 1;
+              continue;
+            }
+            if (stopAtQuote && rawText[j] === '"') {
+              break;
+            }
+            if (rawText[j] === "$") {
+              closeIdx = j;
+              break;
+            }
+          }
+          if (
+            closeIdx > i + 1 &&
+            !/\s/.test(rawText[closeIdx - 1]) &&
+            !(closeIdx + 1 < rawText.length && /\d/.test(rawText[closeIdx + 1]))
+          ) {
+            let tokStart = i;
+            while (tokStart > 0 && !/\s/.test(rawText[tokStart - 1]) && (!stopAtQuote || rawText[tokStart - 1] !== '"')) {
+              tokStart -= 1;
+            }
+            let tokEnd = closeIdx + 1;
+            while (tokEnd < rawText.length && !/\s/.test(rawText[tokEnd]) && (!stopAtQuote || rawText[tokEnd] !== '"')) {
+              tokEnd += 1;
+            }
+            const token = rawText.slice(tokStart, tokEnd);
+            const dollarCount = (token.match(/\$/g) || []).length;
+            if (dollarCount >= 3 || SVG_MATH_YOSYS_PREFIX_RE.test(token)) {
+              pushMathSegment(segments, "text", rawText.slice(i, tokEnd));
+              i = tokEnd;
+              continue;
+            }
+            parseLatexMathSegments(rawText.slice(i + 1, closeIdx), segments, 0);
+            changed = true;
+            i = closeIdx + 1;
+            continue;
+          }
+        }
+        pushMathSegment(segments, "text", "$");
+        i += 1;
+        continue;
+      }
+      pushMathSegment(segments, "text", rawText[i]);
+      i += 1;
+    }
+    return changed ? segments : null;
+  }
+
+  function renderSvgInlineMath(svgEl) {
+    if (!svgEl || svgEl.nodeType !== 1) return svgEl;
+    const doc = svgEl.ownerDocument || (typeof document !== "undefined" ? document : null);
+    if (!doc) return svgEl;
+
+    const walk = (node, insideText) => {
+      if (!node || node.nodeType !== 1) return;
+      const tag = String(node.localName || node.tagName || "").toLowerCase();
+      if (SVG_MATH_SKIP_TAGS.has(tag)) return;
+      const isTextContainer = tag === "text" || (insideText && tag === "tspan");
+      const children = Array.from(node.childNodes || []);
+      for (const child of children) {
+        if (child.nodeType === 3) {
+          if (!isTextContainer) continue;
+          const rawText = child.nodeValue != null ? String(child.nodeValue) : String(child.textContent || "");
+          if (!rawText.includes("$") && !rawText.includes("\\(") && !rawText.includes("\\[")) continue;
+          const segments = parseInlineMathText(rawText);
+          if (!segments) continue;
+          for (const seg of segments) {
+            let newNode = null;
+            if (seg.kind === "text" && !seg.bold) {
+              newNode = typeof doc.createTextNode === "function"
+                ? doc.createTextNode(seg.text)
+                : { nodeType: 3, nodeValue: seg.text, textContent: seg.text };
+            } else {
+              if (typeof doc.createElementNS === "function") {
+                newNode = doc.createElementNS(SVG_NS, "tspan");
+              } else if (typeof doc.createElement === "function") {
+                newNode = doc.createElement("tspan");
+              }
+              if (!newNode) continue;
+              if (seg.kind === "super" || seg.kind === "sub") {
+                newNode.setAttribute("font-size", "75%");
+                newNode.setAttribute("baseline-shift", seg.kind === "super" ? "super" : "sub");
+              }
+              if (seg.bold) {
+                newNode.setAttribute("font-weight", "bold");
+              }
+              newNode.textContent = seg.text;
+            }
+            node.insertBefore(newNode, child);
+          }
+          node.removeChild(child);
+        } else if (child.nodeType === 1) {
+          walk(child, insideText || tag === "text");
+        }
+      }
+    };
+
+    walk(svgEl, false);
+    return svgEl;
+  }
+
+  function formatUnicodeMathScript(text, kind) {
+    const map = kind === "super" ? SVG_MATH_SUPERSCRIPT_MAP : SVG_MATH_SUBSCRIPT_MAP;
+    let out = "";
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === " ") {
+        out += " ";
+        continue;
+      }
+      if (!Object.prototype.hasOwnProperty.call(map, ch)) {
+        return (kind === "super" ? "^" : "_") + text;
+      }
+      out += map[ch];
+    }
+    return out;
+  }
+
+  function preprocessMermaidMath(source) {
+    const src = String(source || "");
+    if (!src.includes("$") && !src.includes("\\(") && !src.includes("\\[")) {
+      return src;
+    }
+    const lines = src.split("\n");
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      if (!line.includes("$") && !line.includes("\\(") && !line.includes("\\[")) continue;
+      const segments = parseInlineMathText(line, true, true);
+      if (!segments) continue;
+      let rebuilt = "";
+      for (const seg of segments) {
+        if (seg.kind === "super" || seg.kind === "sub") {
+          rebuilt += formatUnicodeMathScript(seg.text, seg.kind);
+        } else {
+          rebuilt += seg.text;
+        }
+      }
+      lines[li] = rebuilt;
+    }
+    return lines.join("\n");
+  }
+
+  const SVG_MATH_DOT_NLR_CMDS = new Set(["left", "right", "lim", "ln", "log", "rm"]);
+
+  function isKnownLatexNlrCmd(str, slashIdx) {
+    if (slashIdx + 1 >= str.length || !/[A-Za-z]/.test(str[slashIdx + 1])) return false;
+    let end = slashIdx + 2;
+    while (end < str.length && /[A-Za-z]/.test(str[end])) end += 1;
+    const cmd = str.slice(slashIdx + 1, end);
+    return SVG_MATH_DOT_NLR_CMDS.has(cmd) || Object.prototype.hasOwnProperty.call(SVG_MATH_SYMBOLS, cmd);
+  }
+
+  function isDotBreakEscape(str, idx) {
+    if (idx + 1 >= str.length || str[idx] !== "\\") return false;
+    const nextCh = str[idx + 1];
+    if (nextCh !== "n" && nextCh !== "l" && nextCh !== "r") return false;
+    return !isKnownLatexNlrCmd(str, idx);
+  }
+
+  function escapeDotMathSpan(spanText) {
+    let out = "";
+    let k = 0;
+    while (k < spanText.length) {
+      if (spanText[k] === "\\") {
+        if (k + 1 < spanText.length && spanText[k + 1] === "\\") {
+          out += "\\\\";
+          k += 2;
+          continue;
+        }
+        if (k + 1 < spanText.length && spanText[k + 1] === '"') {
+          out += '\\"';
+          k += 2;
+          continue;
+        }
+        if (k + 1 < spanText.length && (spanText[k + 1] === "n" || spanText[k + 1] === "l" || spanText[k + 1] === "r")) {
+          if (isKnownLatexNlrCmd(spanText, k)) {
+            let cmdEnd = k + 2;
+            while (cmdEnd < spanText.length && /[A-Za-z]/.test(spanText[cmdEnd])) cmdEnd += 1;
+            out += "\\\\" + spanText.slice(k + 1, cmdEnd);
+            k = cmdEnd;
+            continue;
+          }
+          out += "\\" + spanText[k + 1];
+          k += 2;
+          continue;
+        }
+        out += "\\\\";
+        k += 1;
+        continue;
+      }
+      out += spanText[k];
+      k += 1;
+    }
+    return out;
+  }
+
+  function escapeDotStringMath(inner) {
+    if (!inner.includes("$") && !inner.includes("\\(") && !inner.includes("\\[")) {
+      return inner;
+    }
+    let out = "";
+    let i = 0;
+    let failParenBefore = -1;
+    let failBracketBefore = -1;
+    while (i < inner.length) {
+      if (inner[i] === "\\" && i + 1 < inner.length) {
+        const nextCh = inner[i + 1];
+        if (nextCh === "\\" || nextCh === "$" || nextCh === '"') {
+          out += inner.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        if (nextCh === "(" || nextCh === "[") {
+          const isParen = nextCh === "(";
+          const closeChar = isParen ? ")" : "]";
+          const failBefore = isParen ? failParenBefore : failBracketBefore;
+          let closeIdx = -1;
+          if (i >= failBefore) {
+            let limit = inner.length;
+            for (let j = i + 2; j < inner.length - 1; j++) {
+              if (inner[j] === "\n" || isDotBreakEscape(inner, j)) {
+                limit = j;
+                break;
+              }
+              if (inner[j] === "\\") {
+                if (inner[j + 1] === closeChar) {
+                  closeIdx = j;
+                  break;
+                }
+                j += 1;
+              }
+            }
+            if (closeIdx === -1) {
+              if (isParen) failParenBefore = limit;
+              else failBracketBefore = limit;
+            }
+          }
+          if (closeIdx > i + 2 && inner.slice(i + 2, closeIdx).trim().length > 0) {
+            out += escapeDotMathSpan(inner.slice(i, closeIdx + 2));
+            i = closeIdx + 2;
+            continue;
+          }
+          out += inner.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        out += inner.slice(i, i + 2);
+        i += 2;
+        continue;
+      }
+      if (inner[i] === "$") {
+        if (
+          i + 1 < inner.length &&
+          inner[i + 1] !== "$" &&
+          !/\s/.test(inner[i + 1]) &&
+          !isDotBreakEscape(inner, i + 1)
+        ) {
+          let closeIdx = -1;
+          for (let j = i + 1; j < inner.length; j++) {
+            if (inner[j] === "\n" || isDotBreakEscape(inner, j)) break;
+            if (inner[j] === "\\") {
+              j += 1;
+              continue;
+            }
+            if (inner[j] === "$") {
+              closeIdx = j;
+              break;
+            }
+          }
+          if (
+            closeIdx > i + 1 &&
+            !/\s/.test(inner[closeIdx - 1]) &&
+            !(closeIdx + 1 < inner.length && /\d/.test(inner[closeIdx + 1]))
+          ) {
+            let tokStart = i;
+            while (tokStart > 0 && !/\s/.test(inner[tokStart - 1])) {
+              if (tokStart >= 2 && isDotBreakEscape(inner, tokStart - 2) && !(tokStart >= 3 && inner[tokStart - 3] === "\\")) {
+                break;
+              }
+              tokStart -= 1;
+            }
+            let tokEnd = closeIdx + 1;
+            while (tokEnd < inner.length && !/\s/.test(inner[tokEnd]) && !isDotBreakEscape(inner, tokEnd)) {
+              tokEnd += 1;
+            }
+            const token = inner.slice(tokStart, tokEnd);
+            const dollarCount = (token.match(/\$/g) || []).length;
+            if (dollarCount >= 3 || SVG_MATH_YOSYS_PREFIX_RE.test(token)) {
+              out += inner.slice(i, tokEnd);
+              i = tokEnd;
+              continue;
+            }
+            out += escapeDotMathSpan(inner.slice(i, closeIdx + 1));
+            i = closeIdx + 1;
+            continue;
+          }
+        }
+        out += "$";
+        i += 1;
+        continue;
+      }
+      out += inner[i];
+      i += 1;
+    }
+    return out;
+  }
+
+  function preprocessDotMath(source) {
+    const src = String(source || "");
+    if (!src.includes('"') || (!src.includes("$") && !src.includes("\\(") && !src.includes("\\["))) {
+      return src;
+    }
+    let out = "";
+    let i = 0;
+    let atLineStart = true;
+    while (i < src.length) {
+      if (atLineStart && src[i] === "#") {
+        const nl = src.indexOf("\n", i + 1);
+        if (nl === -1) {
+          out += src.slice(i);
+          break;
+        }
+        out += src.slice(i, nl + 1);
+        i = nl + 1;
+        atLineStart = true;
+        continue;
+      }
+      if (src[i] === "/" && i + 1 < src.length && src[i + 1] === "/") {
+        const nl = src.indexOf("\n", i + 2);
+        if (nl === -1) {
+          out += src.slice(i);
+          break;
+        }
+        out += src.slice(i, nl + 1);
+        i = nl + 1;
+        atLineStart = true;
+        continue;
+      }
+      if (src[i] === "/" && i + 1 < src.length && src[i + 1] === "*") {
+        const end = src.indexOf("*/", i + 2);
+        if (end === -1) {
+          out += src.slice(i);
+          break;
+        }
+        out += src.slice(i, end + 2);
+        i = end + 2;
+        atLineStart = false;
+        continue;
+      }
+      if (src[i] === '"') {
+        let closeQuote = -1;
+        for (let j = i + 1; j < src.length; j++) {
+          if (src[j] === "\\") {
+            j += 1;
+            continue;
+          }
+          if (src[j] === '"') {
+            closeQuote = j;
+            break;
+          }
+        }
+        if (closeQuote === -1) {
+          out += src.slice(i);
+          break;
+        }
+        const inner = src.slice(i + 1, closeQuote);
+        out += '"' + escapeDotStringMath(inner) + '"';
+        i = closeQuote + 1;
+        atLineStart = false;
+        continue;
+      }
+      const ch = src[i];
+      out += ch;
+      atLineStart = ch === "\n" ? true : (atLineStart && (ch === " " || ch === "\t" || ch === "\r"));
+      i += 1;
+    }
+    return out;
+  }
+
   const ENGINE_ADAPTERS = {
     async mermaid(source, isDark) {
       await loadEngineScript("mermaid");
@@ -677,19 +1396,23 @@
         startOnLoad: false,
         securityLevel: "strict",
         theme: isDark ? "dark" : "default",
+        themeVariables: { dropShadow: "none" },
+        themeCSS: ".node rect, .node polygon, .node circle, .node ellipse, .node path, .node .outer-path, .cluster rect, .statediagram-cluster rect, .actor, .icon, .icon-neo path, .tag-label-bkg { filter: none !important; }",
         flowchart: { htmlLabels: false },
         htmlLabels: false
       });
       const uid = "sg_mmd_" + (++_renderSeq) + "_" + Math.random().toString(36).slice(2, 7);
-      const rendered = await m.render(uid, String(source || ""));
+      const rendered = await m.render(uid, preprocessMermaidMath(String(source || "")));
       const svgCode = typeof rendered === "string" ? rendered : (rendered && rendered.svg ? rendered.svg : "");
       if (!svgCode) throw new Error("Mermaid returned empty SVG");
       const svgEl = parseAndSanitizeSvg(svgCode, false);
+      renderSvgInlineMath(svgEl);
       return { kind: "svg", element: svgEl };
     },
 
     async svg(source) {
       const svgEl = parseAndSanitizeSvg(source, false);
+      renderSvgInlineMath(svgEl);
       return { kind: "svg", element: svgEl };
     },
 
@@ -699,15 +1422,19 @@
         throw new Error("Graphviz Viz library failed to initialize");
       }
       if (!_vizInstancePromise) {
-        _vizInstancePromise = window.Viz.instance();
+        _vizInstancePromise = window.Viz.instance().catch((err) => {
+          _vizInstancePromise = null;
+          throw err;
+        });
       }
       const viz = await _vizInstancePromise;
-      const svgStr = viz.renderString(String(source || ""), { format: "svg" });
+      const svgStr = viz.renderString(preprocessDotMath(String(source || "")), { format: "svg" });
       if (!svgStr || !svgStr.includes("<svg")) {
         throw new Error("Graphviz returned empty SVG");
       }
       const svgEl = parseAndSanitizeSvg(svgStr, false);
       normalizeDotDarkTheme(svgEl, isDark);
+      renderSvgInlineMath(svgEl);
       return { kind: "svg", element: svgEl };
     },
 
@@ -760,15 +1487,357 @@
       }
       const raw = safeJsonParse(source);
       const { netlist, skin } = normalizeNetlistPayload(raw);
-      const skinXml = skin === "analog" ? nsvg.analogSkin : nsvg.digitalSkin;
+      ensureNetlistSvgMergedSupport(nsvg);
+      const skinXml = skin === "analog"
+        ? nsvg.analogSkin
+        : skin === "mixed"
+          ? getCachedMergedNetlistSkin(nsvg)
+          : nsvg.digitalSkin;
       const svgStr = await nsvg.render(skinXml, netlist);
       if (!svgStr || !svgStr.includes("<svg")) {
         throw new Error("NetlistSVG produced empty SVG");
       }
       const svgEl = parseAndSanitizeSvg(svgStr, false);
+      renderSvgInlineMath(svgEl);
       return { kind: "svg", element: svgEl };
     }
   };
+
+  let _sgNetlistMergedSkinCache = null;
+
+  function rewriteRenamedIds(node, renameMap) {
+    if (!node || !renameMap || renameMap.size === 0) return;
+    if (node.nodeType === 1) {
+      if (node.attributes) {
+        for (let i = 0; i < node.attributes.length; i++) {
+          const attr = node.attributes[i];
+          let val = attr.value;
+          let changed = false;
+          for (const [oldId, newId] of renameMap.entries()) {
+            const urlPattern = `url(#${oldId})`;
+            const hrefPattern = `#${oldId}`;
+            if (val.includes(urlPattern)) {
+              val = val.split(urlPattern).join(`url(#${newId})`);
+              changed = true;
+            }
+            if (val === hrefPattern) {
+              val = `#${newId}`;
+              changed = true;
+            }
+          }
+          if (changed) {
+            node.setAttribute(attr.name, val);
+          }
+        }
+      }
+      const children = node.childNodes || [];
+      for (let i = 0; i < children.length; i++) {
+        rewriteRenamedIds(children[i], renameMap);
+      }
+    }
+  }
+
+  function mergeNetlistSkins(digitalSkinXml, analogSkinXml) {
+    if (typeof digitalSkinXml !== "string" || !digitalSkinXml.trim()) {
+      throw new Error("Invalid digitalSkinXml input");
+    }
+    if (typeof analogSkinXml !== "string" || !analogSkinXml.trim()) {
+      throw new Error("Invalid analogSkinXml input");
+    }
+
+    const DOMParserCtor = typeof DOMParser !== "undefined"
+      ? DOMParser
+      : (typeof globalThis !== "undefined" && globalThis.DOMParser ? globalThis.DOMParser : null);
+    const XMLSerializerCtor = typeof XMLSerializer !== "undefined"
+      ? XMLSerializer
+      : (typeof globalThis !== "undefined" && globalThis.XMLSerializer ? globalThis.XMLSerializer : null);
+
+    if (!DOMParserCtor || !XMLSerializerCtor) {
+      throw new Error("DOMParser or XMLSerializer is not available in environment");
+    }
+
+    const parser = new DOMParserCtor();
+    const serializer = new XMLSerializerCtor();
+
+    const digDoc = parser.parseFromString(digitalSkinXml, "image/svg+xml");
+    const digErr = digDoc.querySelector ? digDoc.querySelector("parsererror") : null;
+    if (digErr) {
+      throw new Error(`Failed to parse digital skin XML: ${digErr.textContent}`);
+    }
+
+    const anaDoc = parser.parseFromString(analogSkinXml, "image/svg+xml");
+    const anaErr = anaDoc.querySelector ? anaDoc.querySelector("parsererror") : null;
+    if (anaErr) {
+      throw new Error(`Failed to parse analog skin XML: ${anaErr.textContent}`);
+    }
+
+    const digSvg = digDoc.documentElement;
+    const anaSvg = anaDoc.documentElement;
+
+    if (anaSvg && anaSvg.attributes) {
+      for (let i = 0; i < anaSvg.attributes.length; i++) {
+        const attr = anaSvg.attributes[i];
+        if (!digSvg.hasAttribute(attr.name)) {
+          digSvg.setAttribute(attr.name, attr.value);
+        }
+      }
+    }
+
+    let digDefs = digDoc.querySelector ? digDoc.querySelector("defs") : null;
+    const anaDefs = anaDoc.querySelector ? anaDoc.querySelector("defs") : null;
+    const idRenameMap = new Map();
+
+    if (anaDefs) {
+      if (!digDefs) {
+        digDefs = digDoc.createElementNS
+          ? digDoc.createElementNS("http://www.w3.org/2000/svg", "defs")
+          : digDoc.createElement("defs");
+        digSvg.insertBefore(digDefs, digSvg.firstChild);
+      }
+
+      const existingDefsMap = new Map();
+      const digDefChildren = digDefs.childNodes || [];
+      for (let i = 0; i < digDefChildren.length; i++) {
+        const c = digDefChildren[i];
+        if (c.nodeType === 1 && c.getAttribute && c.getAttribute("id")) {
+          existingDefsMap.set(c.getAttribute("id"), serializer.serializeToString(c));
+        }
+      }
+
+      const anaDefChildren = anaDefs.childNodes || [];
+      for (let i = 0; i < anaDefChildren.length; i++) {
+        const c = anaDefChildren[i];
+        if (c.nodeType !== 1) continue;
+        const oldId = c.getAttribute ? c.getAttribute("id") : null;
+        if (!oldId) {
+          digDefs.appendChild(digDoc.importNode ? digDoc.importNode(c, true) : c.cloneNode(true));
+          continue;
+        }
+        const serialized = serializer.serializeToString(c);
+        if (existingDefsMap.has(oldId)) {
+          if (existingDefsMap.get(oldId) === serialized) {
+            continue;
+          }
+          let newId = `sg_ana_${oldId}`;
+          let counter = 1;
+          while (existingDefsMap.has(newId)) {
+            newId = `sg_ana_${oldId}_${counter++}`;
+          }
+          idRenameMap.set(oldId, newId);
+          const imported = digDoc.importNode ? digDoc.importNode(c, true) : c.cloneNode(true);
+          imported.setAttribute("id", newId);
+          digDefs.appendChild(imported);
+          existingDefsMap.set(newId, serializer.serializeToString(imported));
+        } else {
+          const imported = digDoc.importNode ? digDoc.importNode(c, true) : c.cloneNode(true);
+          digDefs.appendChild(imported);
+          existingDefsMap.set(oldId, serialized);
+        }
+      }
+    }
+
+    const digStyle = digDoc.querySelector ? digDoc.querySelector("style") : null;
+    const anaStyle = anaDoc.querySelector ? anaDoc.querySelector("style") : null;
+    if (anaStyle) {
+      if (!digStyle) {
+        const newStyle = digDoc.createElementNS
+          ? digDoc.createElementNS("http://www.w3.org/2000/svg", "style")
+          : digDoc.createElement("style");
+        newStyle.textContent = anaStyle.textContent;
+        digSvg.appendChild(newStyle);
+      } else {
+        const digCss = digStyle.textContent || "";
+        const anaCss = anaStyle.textContent || "";
+        const cleanDig = digCss.replace(/\/\*[\s\S]*?\*\//g, "");
+        const cleanAna = anaCss.replace(/\/\*[\s\S]*?\*\//g, "");
+        const existingSelectors = new Set();
+        const ruleRe = /([^{}]+)\{([^}]+)\}/g;
+        let baseStrokeWidth = "1";
+        let m;
+        while ((m = ruleRe.exec(cleanDig)) !== null) {
+          const parts = m[1].split(",");
+          let isBaseSelector = false;
+          for (let i = 0; i < parts.length; i++) {
+            const s = parts[i].trim();
+            if (s) {
+              existingSelectors.add(s);
+              if (s === "svg" || s === "path" || s === "line") {
+                isBaseSelector = true;
+              }
+            }
+          }
+          if (isBaseSelector) {
+            const swMatch = m[2].match(/stroke-width\s*:\s*([^;}\s]+)/i);
+            if (swMatch) {
+              baseStrokeWidth = swMatch[1];
+            }
+          }
+        }
+        const baseStrokeNum = parseFloat(baseStrokeWidth);
+        const toAppend = [];
+        while ((m = ruleRe.exec(cleanAna)) !== null) {
+          const parts = m[1].split(",");
+          const missing = [];
+          for (let i = 0; i < parts.length; i++) {
+            const s = parts[i].trim();
+            if (s && !existingSelectors.has(s)) {
+              missing.push(s);
+              existingSelectors.add(s);
+            }
+          }
+          if (missing.length > 0) {
+            let body = m[2].trim();
+            const isSymbolRule = missing.some((s) => /\.symbol\b/.test(s));
+            const isDetailRule = missing.some((s) => /\.detail\b/.test(s));
+            if (isSymbolRule || isDetailRule) {
+              body = body.replace(/(stroke-width\s*:\s*)([^;]+)/gi, (full, prefix, val) => {
+                if (isSymbolRule) return `${prefix}${baseStrokeWidth}`;
+                const n = parseFloat(val);
+                return Number.isFinite(n) && Number.isFinite(baseStrokeNum) && n > baseStrokeNum
+                  ? `${prefix}${baseStrokeWidth}`
+                  : full;
+              });
+            }
+            toAppend.push(`\n${missing.join(", ")} {\n  ${body}\n}`);
+          }
+        }
+        if (toAppend.length > 0) {
+          digStyle.textContent = digCss + toAppend.join("") + "\n";
+        }
+      }
+    }
+
+    const existingTypes = new Set();
+    const digChildren = digSvg.childNodes || [];
+    for (let i = 0; i < digChildren.length; i++) {
+      const c = digChildren[i];
+      if (c.nodeType === 1 && (c.localName === "g" || c.tagName === "g")) {
+        const stype = c.getAttribute
+          ? (c.getAttribute("s:type") || (c.getAttributeNS && c.getAttributeNS("https://github.com/nturley/netlistsvg", "type")))
+          : null;
+        if (stype) existingTypes.add(stype);
+      }
+    }
+
+    const anaChildren = anaSvg.childNodes || [];
+    for (let i = 0; i < anaChildren.length; i++) {
+      const c = anaChildren[i];
+      if (c.nodeType === 1 && (c.localName === "g" || c.tagName === "g")) {
+        const stype = c.getAttribute
+          ? (c.getAttribute("s:type") || (c.getAttributeNS && c.getAttributeNS("https://github.com/nturley/netlistsvg", "type")))
+          : null;
+        if (stype && !existingTypes.has(stype)) {
+          const copy = digDoc.importNode ? digDoc.importNode(c, true) : c.cloneNode(true);
+          if (idRenameMap.size > 0) {
+            rewriteRenamedIds(copy, idRenameMap);
+          }
+          digSvg.appendChild(copy);
+          existingTypes.add(stype);
+        }
+      }
+    }
+
+    return serializer.serializeToString(digSvg);
+  }
+
+  function getCachedMergedNetlistSkin(nsvg) {
+    if (!nsvg) return "";
+    const digRef = nsvg.digitalSkin;
+    const anaRef = nsvg.analogSkin;
+    if (
+      _sgNetlistMergedSkinCache &&
+      _sgNetlistMergedSkinCache.digRef === digRef &&
+      _sgNetlistMergedSkinCache.anaRef === anaRef
+    ) {
+      return _sgNetlistMergedSkinCache.mergedXml;
+    }
+    const mergedXml = mergeNetlistSkins(digRef, anaRef);
+    _sgNetlistMergedSkinCache = { digRef, anaRef, mergedXml };
+    return mergedXml;
+  }
+
+  function domNodeToOnml(node) {
+    if (!node) return null;
+    if (node.nodeType === 3 || node.nodeType === 4) {
+      return node.textContent;
+    }
+    if (node.nodeType === 1) {
+      const tag = node.tagName || node.localName;
+      const localTag = (node.localName || tag || "").toLowerCase();
+      const attrs = {};
+      if (node.attributes) {
+        for (let i = 0; i < node.attributes.length; i++) {
+          const attr = node.attributes[i];
+          attrs[attr.name] = attr.value;
+        }
+      }
+      const children = [];
+      const childNodes = node.childNodes || [];
+      for (let i = 0; i < childNodes.length; i++) {
+        const child = childNodes[i];
+        if (child.nodeType === 3 || child.nodeType === 4) {
+          const text = child.textContent;
+          if (localTag === "style" || localTag === "text" || text.trim().length > 0) {
+            children.push(text);
+          }
+        } else if (child.nodeType === 1) {
+          const childOnml = domNodeToOnml(child);
+          if (childOnml) children.push(childOnml);
+        }
+      }
+      return [tag, attrs, ...children];
+    }
+    return null;
+  }
+
+  function xmlToOnml(xmlStr) {
+    const DOMParserCtor = typeof DOMParser !== "undefined"
+      ? DOMParser
+      : (typeof globalThis !== "undefined" && globalThis.DOMParser ? globalThis.DOMParser : null);
+    if (!DOMParserCtor) return null;
+    const parser = new DOMParserCtor();
+    const doc = parser.parseFromString(xmlStr, "image/svg+xml");
+    if (doc.querySelector && doc.querySelector("parsererror")) {
+      return null;
+    }
+    return domNodeToOnml(doc.documentElement);
+  }
+
+  function ensureNetlistSvgMergedSupport(nsvg) {
+    if (!nsvg || nsvg._sgMergedSupport) return;
+    const origRender = nsvg.render;
+    let cachedXml = null;
+    let cachedOnml = null;
+    nsvg.render = async function (skinData, yosysNetlist) {
+      if (
+        typeof skinData === "string" &&
+        skinData !== nsvg.digitalSkin &&
+        skinData !== nsvg.analogSkin &&
+        skinData !== "digital" &&
+        skinData !== "analog"
+      ) {
+        let onml;
+        if (skinData === cachedXml && cachedOnml) {
+          onml = cachedOnml;
+        } else {
+          onml = xmlToOnml(skinData);
+          if (onml) {
+            cachedXml = skinData;
+            cachedOnml = onml;
+          }
+        }
+        if (onml) {
+          return origRender.call(this, onml, yosysNetlist);
+        }
+      }
+      return origRender.call(this, skinData, yosysNetlist);
+    };
+    nsvg._sgMergedSupport = true;
+  }
+
+  if (typeof window !== "undefined" && window.netlistsvg) {
+    ensureNetlistSvgMergedSupport(window.netlistsvg);
+  }
 
   function collectRawNetTokens(rawVal, outSet = new Set()) {
     if (typeof rawVal === "number" && Number.isInteger(rawVal)) {
@@ -854,8 +1923,11 @@
     return { gndRailTokens, vccRailTokens };
   }
 
-  function resolveNetlistCellType(rawType, rawConns, gndRailTokens, vccRailTokens) {
+  function resolveNetlistCellType(rawType, rawConns, gndRailTokens, vccRailTokens, skipAnalogAliases = false) {
     const raw = typeof rawType === "string" && rawType.trim() ? rawType.trim() : "generic";
+    if (skipAnalogAliases) {
+      return raw;
+    }
     const normKey = raw.toLowerCase().replace(/[\s-]+/g, "_");
 
     if (NETLIST_ANALOG_TYPES.has(normKey)) {
@@ -902,36 +1974,38 @@
     return null;
   }
 
-  function inferNetlistPinDirection(cellTypeLower, pinName) {
-    if (cellTypeLower === "vcc") return "output";
-    if (cellTypeLower === "gnd" || cellTypeLower === "vee") return "input";
+  function inferNetlistPinDirection(cellTypeLower, pinName, isAnalogCell = true) {
     const pinUpper = String(pinName || "").trim().toUpperCase();
-    if (
-      cellTypeLower === "q_npn" ||
-      cellTypeLower === "q_pnp" ||
-      cellTypeLower === "transistor_npn" ||
-      cellTypeLower === "transistor_pnp"
-    ) {
-      return pinUpper === "E" ? "output" : "input";
-    }
-    if (cellTypeLower === "nmos" || cellTypeLower === "q_nmos" || cellTypeLower === "mosfet_n") {
-      return pinUpper === "S" ? "output" : "input";
-    }
-    if (cellTypeLower === "pmos" || cellTypeLower === "q_pmos" || cellTypeLower === "mosfet_p") {
-      return pinUpper === "D" ? "output" : "input";
-    }
-    if (/^(?:pot|potentiometer)_[hv]$/.test(cellTypeLower)) {
-      return pinUpper === "B" || pinUpper === "W" ? "output" : "input";
-    }
-    if (cellTypeLower === "opamp" || cellTypeLower === "op") {
-      return pinUpper === "OUT" || pinUpper === "Y" ? "output" : "input";
-    }
-    if (cellTypeLower === "transformer_1p_1s") {
-      return pinUpper === "L2.1" || pinUpper === "L2.2" ? "output" : "input";
-    }
-    if (NETLIST_TWO_PIN_ANALOG_TYPES.has(cellTypeLower)) {
-      if (pinUpper === "B" || pinUpper === "-") return "output";
-      return "input";
+    if (isAnalogCell) {
+      if (cellTypeLower === "vcc") return "output";
+      if (cellTypeLower === "gnd" || cellTypeLower === "vee") return "input";
+      if (
+        cellTypeLower === "q_npn" ||
+        cellTypeLower === "q_pnp" ||
+        cellTypeLower === "transistor_npn" ||
+        cellTypeLower === "transistor_pnp"
+      ) {
+        return pinUpper === "E" ? "output" : "input";
+      }
+      if (cellTypeLower === "nmos" || cellTypeLower === "q_nmos" || cellTypeLower === "mosfet_n") {
+        return pinUpper === "S" ? "output" : "input";
+      }
+      if (cellTypeLower === "pmos" || cellTypeLower === "q_pmos" || cellTypeLower === "mosfet_p") {
+        return pinUpper === "D" ? "output" : "input";
+      }
+      if (/^(?:pot|potentiometer)_[hv]$/.test(cellTypeLower)) {
+        return pinUpper === "B" || pinUpper === "W" ? "output" : "input";
+      }
+      if (cellTypeLower === "opamp" || cellTypeLower === "op") {
+        return pinUpper === "OUT" || pinUpper === "Y" ? "output" : "input";
+      }
+      if (cellTypeLower === "transformer_1p_1s") {
+        return pinUpper === "L2.1" || pinUpper === "L2.2" ? "output" : "input";
+      }
+      if (NETLIST_TWO_PIN_ANALOG_TYPES.has(cellTypeLower)) {
+        if (pinUpper === "B" || pinUpper === "-") return "output";
+        return "input";
+      }
     }
     if (NETLIST_OUTPUT_PINS.has(pinUpper) || /^OUT\d*$/.test(pinUpper)) {
       return "output";
@@ -993,7 +2067,7 @@
     }
 
     let swappedAB = false;
-    if (NETLIST_NONPOLAR_TWOPIN_TYPES.has(cellTypeLower) && cellTypeLower.endsWith("_v")) {
+    if (isAnalogCell && NETLIST_NONPOLAR_TWOPIN_TYPES.has(cellTypeLower) && cellTypeLower.endsWith("_v")) {
       if (normConns.A !== undefined && normConns.B !== undefined) {
         const toksA = collectRawNetTokens(rawByTargetPin.A);
         const toksB = collectRawNetTokens(rawByTargetPin.B);
@@ -1024,7 +2098,7 @@
     }
     for (const pin of Object.keys(normConns)) {
       if (!Object.prototype.hasOwnProperty.call(normDirs, pin)) {
-        normDirs[pin] = inferNetlistPinDirection(cellTypeLower, pin);
+        normDirs[pin] = inferNetlistPinDirection(cellTypeLower, pin, isAnalogCell);
       }
     }
 
@@ -1062,6 +2136,15 @@
       }
     }
     return hasAny ? out : null;
+  }
+
+  function cloneSafePlainObject(obj) {
+    const out = {};
+    for (const k of Object.keys(obj)) {
+      if (FORBIDDEN_JSON_KEYS.has(k)) continue;
+      out[k] = obj[k];
+    }
+    return out;
   }
 
   function normalizeNetlistPayload(rawObj) {
@@ -1125,7 +2208,9 @@
 
     let nextBitId = maxBitId;
     const explicitSkin = String(rawObj.skin || "").trim().toLowerCase();
+    const isExplicitDigital = explicitSkin === "digital";
     let sawAnalogCell = explicitSkin === "analog";
+    let sawDigitalCell = isExplicitDigital;
     const normalizedModules = {};
 
     for (const modKey of Object.keys(sourceModules)) {
@@ -1195,11 +2280,13 @@
           const rawConns = cell.connections && typeof cell.connections === "object" && !Array.isArray(cell.connections)
             ? cell.connections
             : {};
-          const cellType = resolveNetlistCellType(cell.type, rawConns, gndRailTokens, vccRailTokens);
+          const cellType = resolveNetlistCellType(cell.type, rawConns, gndRailTokens, vccRailTokens, isExplicitDigital);
           const cellTypeLower = cellType.toLowerCase();
-          const isAnalogCell = NETLIST_ANALOG_TYPES.has(cellTypeLower);
+          const isAnalogCell = !isExplicitDigital && NETLIST_ANALOG_TYPES.has(cellTypeLower);
           if (isAnalogCell) {
             sawAnalogCell = true;
+          } else {
+            sawDigitalCell = true;
           }
 
           const existingDirs = cell.port_directions && typeof cell.port_directions === "object" && !Array.isArray(cell.port_directions)
@@ -1225,7 +2312,7 @@
             normCell.attributes = normAttrs;
           }
           if (cell.parameters && typeof cell.parameters === "object" && !Array.isArray(cell.parameters)) {
-            normCell.parameters = cell.parameters;
+            normCell.parameters = cloneSafePlainObject(cell.parameters);
           }
           if (cell.hide_name !== undefined) {
             normCell.hide_name = cell.hide_name;
@@ -1239,7 +2326,7 @@
         cells: normCells
       };
       if (mod.attributes && typeof mod.attributes === "object" && !Array.isArray(mod.attributes)) {
-        normMod.attributes = mod.attributes;
+        normMod.attributes = cloneSafePlainObject(mod.attributes);
       }
       normalizedModules[modKey] = normMod;
     }
@@ -1250,9 +2337,15 @@
 
     const skin = explicitSkin === "digital"
       ? "digital"
-      : explicitSkin === "analog" || sawAnalogCell
+      : explicitSkin === "analog"
         ? "analog"
-        : "digital";
+        : explicitSkin === "mixed" || explicitSkin === "unified"
+          ? "mixed"
+          : (sawAnalogCell && sawDigitalCell)
+            ? "mixed"
+            : sawAnalogCell
+              ? "analog"
+              : "digital";
 
     return {
       netlist: { modules: normalizedModules },
@@ -1272,6 +2365,7 @@
       return;
     }
 
+    const gen = ++_renderGen;
     _currentEngine = engine;
     _currentSource = String(source || "");
     _currentTheme = theme === "light" ? "light" : "dark";
@@ -1283,6 +2377,7 @@
 
     try {
       const result = await adapter(_currentSource, isDark);
+      if (gen !== _renderGen) return;
       hideStatus();
 
       if (result.kind === "svg") {
@@ -1329,6 +2424,7 @@
         });
       }
     } catch (err) {
+      if (gen !== _renderGen) return;
       clearStage();
       const msg = String(err && err.message || err || "Diagram render failed");
       showStatus(msg, true);
@@ -1523,6 +2619,12 @@
       safeJsonParse,
       validateChartConfig,
       normalizeNetlistPayload,
+      mergeNetlistSkins,
+      ensureNetlistSvgMergedSupport,
+      xmlToOnml,
+      renderSvgInlineMath,
+      preprocessMermaidMath,
+      preprocessDotMath,
       isSafeHref,
       sanitizeCssText
     };

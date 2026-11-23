@@ -183,6 +183,7 @@ chrome.tabs.onActivated.addListener(async e => {
 }), chrome.tabs.onRemoved.addListener(e => {
   deleteTabTargetState(e);
   sgUntrackTempTab("all", e);
+  "function" == typeof sgOnTabRemovedCleanupBgAi && sgOnTabRemovedCleanupBgAi(e);
   "function" == typeof sgOnTabRemovedCleanupOrch && sgOnTabRemovedCleanupOrch(e);
 });
 if (chrome.windows && chrome.windows.onRemoved) {
@@ -281,10 +282,55 @@ function sgDrainTrackedTempTabs(bucket) {
 }
 
 const SG_BG_AI_WINDOWS_SESSION_KEY = "sgActiveBgAiWindows";
+const SG_BG_AI_IDLE_ALARM_NAME = "sg_bg_ai_idle_cleanup";
+const SG_BG_AI_IDLE_TTL_MS = 4 * 60 * 1000;
 const _activeBgAiWindowIds = new Set();
+const _sgBgAiLeasedTabIds = new Set();
+const _sgBgResponseWaiters = new Map();
 let _sgBgAiWorkerWindowId = null;
 let _sgBgAiWindowPromise = null;
 let _sgBgAiPendingCreates = 0;
+let _sgBgAiWarmTab = null;
+let _sgBgAiIdleTimer = null;
+let _sgBgWatchSeq = 0;
+
+function sgRejectBgWaitersForTab(tabId, reason = "Worker tab closed") {
+  for (const [watchId, waiter] of _sgBgResponseWaiters.entries()) {
+    if (waiter && waiter.tabId === tabId) {
+      _sgBgResponseWaiters.delete(watchId);
+      try {
+        waiter.reject(new Error(reason));
+      } catch (_e) {}
+    }
+  }
+}
+
+function sgClearBgAiIdleTimer() {
+  if (_sgBgAiIdleTimer) {
+    clearTimeout(_sgBgAiIdleTimer);
+    _sgBgAiIdleTimer = null;
+  }
+  try {
+    if (typeof chrome !== "undefined" && chrome.alarms && "function" == typeof chrome.alarms.clear) {
+      Promise.resolve(chrome.alarms.clear(SG_BG_AI_IDLE_ALARM_NAME)).catch(() => {});
+    }
+  } catch (_e) {}
+}
+
+function sgScheduleBgAiIdleTimer() {
+  sgClearBgAiIdleTimer();
+  _sgBgAiIdleTimer = setTimeout(() => {
+    _sgBgAiIdleTimer = null;
+    sgDestroyWarmBgAiPool().catch(() => {});
+  }, SG_BG_AI_IDLE_TTL_MS);
+  try {
+    if (typeof chrome !== "undefined" && chrome.alarms && "function" == typeof chrome.alarms.create) {
+      chrome.alarms.create(SG_BG_AI_IDLE_ALARM_NAME, {
+        delayInMinutes: Math.max(1, SG_BG_AI_IDLE_TTL_MS / 60000)
+      });
+    }
+  } catch (_e) {}
+}
 
 function sgTrackBgAiWindow(winId) {
   if ("number" != typeof winId) return Promise.resolve();
@@ -338,8 +384,24 @@ function sgOnWindowRemovedCleanupBgAi(removedWindowId) {
   if ("number" != typeof removedWindowId) return;
   if (_sgBgAiWorkerWindowId === removedWindowId) {
     _sgBgAiWorkerWindowId = null;
+    if (_sgBgAiWarmTab) {
+      const deadWarmTid = _sgBgAiWarmTab.tabId;
+      _sgBgAiWarmTab = null;
+      sgRejectBgWaitersForTab(deadWarmTid, "Worker window closed");
+    }
+    sgClearBgAiIdleTimer();
   }
   sgUntrackBgAiWindow(removedWindowId);
+}
+
+function sgOnTabRemovedCleanupBgAi(removedTabId) {
+  if ("number" != typeof removedTabId) return;
+  _sgBgAiLeasedTabIds.delete(removedTabId);
+  sgRejectBgWaitersForTab(removedTabId, "Worker tab removed");
+  if (_sgBgAiWarmTab && _sgBgAiWarmTab.tabId === removedTabId) {
+    _sgBgAiWarmTab = null;
+    sgClearBgAiIdleTimer();
+  }
 }
 
 async function sgCreateHiddenBgAiTab(workerUrl, srcTab) {
@@ -449,10 +511,87 @@ async function sgCreateHiddenBgAiTab(workerUrl, srcTab) {
 
 async function sgCloseHiddenBgAiTab(tabId) {
   if ("number" == typeof tabId) {
+    _sgBgAiLeasedTabIds.delete(tabId);
+    sgRejectBgWaitersForTab(tabId, "Worker tab closed");
+    if (_sgBgAiWarmTab && _sgBgAiWarmTab.tabId === tabId) {
+      _sgBgAiWarmTab = null;
+      sgClearBgAiIdleTimer();
+    }
     try { await chrome.tabs.remove(tabId); } catch (_e) {}
     await sgUntrackTempTab("opt", tabId);
   }
   if (activeOptimizationTabIds.size === 0 && _sgBgAiPendingCreates === 0 && "number" == typeof _sgBgAiWorkerWindowId) {
+    const wid = _sgBgAiWorkerWindowId;
+    _sgBgAiWorkerWindowId = null;
+    sgClearBgAiIdleTimer();
+    if (chrome.windows && "function" == typeof chrome.windows.remove) {
+      try { await chrome.windows.remove(wid); } catch (_e) {}
+    }
+    await sgUntrackBgAiWindow(wid);
+  }
+}
+
+async function sgAcquireHiddenBgAiTab(accountUrl, srcTab) {
+  const normAccountUrl = String(accountUrl || "https://gemini.google.com/app").split("#")[0];
+  sgClearBgAiIdleTimer();
+
+  if (_sgBgAiWarmTab) {
+    const cand = _sgBgAiWarmTab;
+    _sgBgAiWarmTab = null;
+    let alive = !1;
+    if (cand.accountUrl === normAccountUrl && "number" == typeof cand.tabId) {
+      try {
+        const tab = await chrome.tabs.get(cand.tabId);
+        alive = Boolean(tab && tab.id === cand.tabId && !tab.discarded);
+      } catch (_e) {
+        alive = !1;
+      }
+    }
+    if (alive) {
+      _sgBgAiLeasedTabIds.add(cand.tabId);
+      await sgTrackTempTab("opt", cand.tabId);
+      return { tabId: cand.tabId, reused: !0 };
+    }
+    await sgCloseHiddenBgAiTab(cand.tabId);
+  }
+
+  const tabId = await sgCreateHiddenBgAiTab(normAccountUrl + "#sg_bg_worker=1", srcTab);
+  _sgBgAiLeasedTabIds.add(tabId);
+  return { tabId, reused: !1 };
+}
+
+async function sgReleaseHiddenBgAiTab(tabId, { keepWarm = !0, accountUrl = "", unhealthy = !1 } = {}) {
+  if ("number" != typeof tabId) return;
+  _sgBgAiLeasedTabIds.delete(tabId);
+  sgRejectBgWaitersForTab(tabId, "Worker task finished");
+  const canKeep = Boolean(
+    keepWarm &&
+    !unhealthy &&
+    !_sgBgAiWarmTab &&
+    "number" == typeof _sgBgAiWorkerWindowId
+  );
+  if (canKeep) {
+    _sgBgAiWarmTab = {
+      tabId,
+      accountUrl: String(accountUrl || "https://gemini.google.com/app").split("#")[0],
+      lastUsedAt: Date.now()
+    };
+    sgScheduleBgAiIdleTimer();
+    return;
+  }
+  await sgCloseHiddenBgAiTab(tabId);
+}
+
+async function sgDestroyWarmBgAiPool() {
+  if (_sgBgAiLeasedTabIds.size > 0 || _sgBgAiPendingCreates > 0) return;
+  sgClearBgAiIdleTimer();
+  if (_sgBgAiWarmTab) {
+    const tid = _sgBgAiWarmTab.tabId;
+    _sgBgAiWarmTab = null;
+    await sgCloseHiddenBgAiTab(tid);
+    return;
+  }
+  if ("number" == typeof _sgBgAiWorkerWindowId && activeOptimizationTabIds.size === 0) {
     const wid = _sgBgAiWorkerWindowId;
     _sgBgAiWorkerWindowId = null;
     if (chrome.windows && "function" == typeof chrome.windows.remove) {
@@ -912,12 +1051,34 @@ chrome.permissions.onRemoved.addListener(e => {
     n && n({ ok: !0 });
     return false;
   }
+  if ("SG_BG_WORKER_RESPONSE_EVENT" === e.type) {
+    const wId = e.watchId;
+    const waiter = wId && _sgBgResponseWaiters.get(wId);
+    if (waiter && (!t?.tab?.id || t.tab.id === waiter.tabId)) {
+      if (e.done && e.response) {
+        _sgBgResponseWaiters.delete(wId);
+        waiter.resolve(e.response);
+      } else if (e.error) {
+        _sgBgResponseWaiters.delete(wId);
+        waiter.reject(new Error(String(e.error)));
+      }
+    }
+    n && n({ ok: !0 });
+    return false;
+  }
   if ("OPTIMIZE_PROMPT" === e.type) return handleOptimizePrompt(e, t).then(n).catch(err => n && n({ success: !1, error: String(err && err.message || err) })), !0;
   if ("FIX_GRAMMAR" === e.type) return handleFixGrammar(e, t).then(n).catch(err => n && n({ success: !1, error: String(err && err.message || err) })), !0;
   if ("GENERATE_CHECKPOINT_SUMMARY" === e.type) return handleGenerateCheckpointSummary(e, t).then(n).catch(err => n && n({ success: !1, error: String(err && err.message || err) })), !0;
   if ("CANCEL_CHECKPOINT_SUMMARY" === e.type) return handleCancelCheckpointSummary().then(n).catch(err => n && n({ ok: !1, error: String(err && err.message || err) })), !0;
   if ("CANCEL_OPTIMIZATION" === e.type) return (async () => {
     try {
+      sgClearBgAiIdleTimer();
+      _sgBgAiWarmTab = null;
+      _sgBgAiLeasedTabIds.clear();
+      for (const [, waiter] of _sgBgResponseWaiters.entries()) {
+        try { waiter.reject(new Error("Optimization cancelled")); } catch (_e) {}
+      }
+      _sgBgResponseWaiters.clear();
       const tabIds = await sgDrainTrackedTempTabs("opt");
       for (const tabId of tabIds) {
         if ("undefined" != typeof _activeCheckpointTabId && _activeCheckpointTabId === tabId) {
@@ -1912,6 +2073,643 @@ function scrapeChatHistoryFromPage() {
     })
   }), e
 }
+async function sgPrepareBgAiTabInPage(requireCleanTemp, maxWaitMs = 12000) {
+  if (document.body) {
+    document.body.dataset.sgBgWorker = "true";
+    document.body.classList.remove("sg-periodic-send-blocked");
+  }
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const isVisible = el => Boolean(
+    el && !el.disabled &&
+    (null !== el.offsetParent || ("function" == typeof el.getClientRects && el.getClientRects().length > 0))
+  );
+  const findFirstVisible = sel => {
+    for (const el of document.querySelectorAll(sel)) {
+      if (isVisible(el)) return el;
+    }
+    return null;
+  };
+  const isSidebarOpen = () => {
+    const app = document.querySelector("chat-app#app-root, chat-app, main.chat-app");
+    if (!app) return !0;
+    const sparkleHost = document.querySelector("side-nav-sparkle-button");
+    const sparkleBtn = document.querySelector('button[data-test-id="side-nav-sparkle-button"]');
+    const isSparkleCollapsed = Boolean(
+      (sparkleHost && sparkleHost.classList.contains("collapsed")) ||
+      (sparkleBtn && "false" === sparkleBtn.getAttribute("aria-expanded"))
+    );
+    const historyNav = document.querySelector(".sidenav-with-history-container");
+    const isHistoryOpen = Boolean(historyNav && !historyNav.classList.contains("collapsed"));
+    const isSparkleExpanded = Boolean(sparkleBtn && "true" === sparkleBtn.getAttribute("aria-expanded"));
+    return Boolean(app.classList.contains("side-nav-open") || isSparkleExpanded || (!isSparkleCollapsed && isHistoryOpen));
+  };
+  const isTempActive = () => {
+    if (document.querySelector("chat-window.is-temporary-chat")) return !0;
+    const btn = document.querySelector('temp-chat-button button, [data-test-id="temp-chat-button-container"] button, button[jslog^="274589"], [data-test-id="temp-chat-button"], ms-incognito-mode-toggle button');
+    if (!btn) return !1;
+    const host = btn.closest("temp-chat-button") || btn;
+    return host.classList.contains("temp-chat-on") || btn.classList.contains("temp-chat-on") || btn.classList.contains("ms-button-active") || btn.classList.contains("active") || "true" === btn.getAttribute("aria-pressed") || !!host.querySelector('mat-icon[fonticon="close"]');
+  };
+  const findTempBtn = () => {
+    const direct = document.querySelector('temp-chat-button button, [data-test-id="temp-chat-button-container"] button, button[jslog^="274589"], [data-test-id="temp-chat-button"], button.temp-chat-button');
+    if (direct) return direct;
+    for (const el of document.querySelectorAll('button, [role="button"]')) {
+      const txt = (el.textContent || "").toLowerCase().trim();
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      if (txt.includes("temporary") || aria.includes("temporary") || txt.includes("tạm thời") || aria.includes("tạm thời")) return el;
+    }
+    return document.querySelector('button[class*="temporary"], [role="button"][class*="temporary"], [data-temporary], a[href*="temp"]');
+  };
+  const findComposer = () => {
+    for (const sel of ["rich-textarea .ql-editor", ".ql-editor.textarea", '.ql-editor[contenteditable="true"]', 'div[contenteditable="true"][role="textbox"]']) {
+      const el = document.querySelector(sel);
+      if (el && el.isConnected) return el;
+    }
+    return null;
+  };
+
+  const deadline = Date.now() + Math.max(1500, Number(maxWaitMs) || 12000);
+  let lastSidebarClickAt = 0;
+  let lastTempClickAt = 0;
+  let lastResetClickAt = 0;
+  let settledTempAt = 0;
+
+  while (Date.now() < deadline) {
+    if (document.body) {
+      document.body.dataset.sgBgWorker = "true";
+      document.body.classList.remove("sg-periodic-send-blocked");
+    }
+    const now = Date.now();
+    if (!isSidebarOpen() && now - lastSidebarClickAt > 700) {
+      const sbBtn = findFirstVisible('button[data-test-id="side-nav-sparkle-button"]')
+        || findFirstVisible('side-nav-menu-button button, [data-test-id="side-nav-menu-button"] button, button[data-test-id="side-nav-menu-button"], button.main-menu-button, button[aria-label="Main menu"], button[aria-label*="Mở thanh bên" i]')
+        || findFirstVisible('button[aria-label*="menu" i]');
+      if (sbBtn) {
+        sbBtn.click();
+        lastSidebarClickAt = now;
+      }
+    }
+
+    const msgCount = document.querySelectorAll("user-query, model-response").length;
+    const tempOn = isTempActive();
+
+    if (requireCleanTemp && msgCount > 0) {
+      if (now - lastResetClickAt > 1100) {
+        const newChatBtn = document.querySelector('a[data-test-id="expanded-button"][href$="/app"], [data-test-id="new-chat-button"] a, button[aria-label*="New chat" i], button[aria-label*="Cuộc trò chuyện mới" i], a[href$="/app"]');
+        const fallbackBtn = newChatBtn || findTempBtn();
+        if (fallbackBtn) {
+          fallbackBtn.click();
+          lastResetClickAt = now;
+          settledTempAt = 0;
+        }
+      }
+      await wait(80);
+      continue;
+    }
+
+    if (!tempOn) {
+      if (now - lastTempClickAt > 1000) {
+        const tBtn = findTempBtn();
+        if (tBtn) {
+          tBtn.click();
+          lastTempClickAt = now;
+          settledTempAt = now + 260;
+        }
+      }
+      await wait(80);
+      continue;
+    }
+
+    if (settledTempAt > now) {
+      await wait(60);
+      continue;
+    }
+
+    const composer = findComposer();
+    if (composer) {
+      if (requireCleanTemp && composer.textContent) {
+        composer.textContent = "";
+        composer.dispatchEvent(new Event("input", { bubbles: !0 }));
+      }
+      return {
+        ok: !0,
+        tempActive: !0,
+        baselineResponses: document.querySelectorAll("model-response").length,
+        baselineUserQueries: document.querySelectorAll("user-query").length
+      };
+    }
+
+    await wait(80);
+  }
+
+  return {
+    ok: !1,
+    tempActive: isTempActive(),
+    msgCount: document.querySelectorAll("user-query, model-response").length
+  };
+}
+
+async function sgEnterAndSubmitBgAiPromptInPage(promptText, maxWaitMs = 15000) {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const composerSelectors = [
+    "rich-textarea .ql-editor",
+    ".ql-editor.textarea",
+    '.ql-editor[contenteditable="true"]',
+    'div[contenteditable="true"][role="textbox"]'
+  ];
+  const findComposer = () => {
+    for (const sel of composerSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.isConnected) return el;
+    }
+    return null;
+  };
+  const isVisible = el => {
+    if (!el || !el.isConnected) return !1;
+    if (null !== el.offsetParent) return !0;
+    if ("function" == typeof el.getClientRects && el.getClientRects().length > 0) return !0;
+    try {
+      if ("function" == typeof getComputedStyle) {
+        const cs = getComputedStyle(el);
+        return Boolean(cs && "none" !== cs.display && "hidden" !== cs.visibility);
+      }
+    } catch (_e) {}
+    return !1;
+  };
+  const isBlocked = btn => {
+    if (!btn || !btn.isConnected || btn.disabled || btn.hasAttribute("disabled") || "true" === btn.getAttribute("aria-disabled")) return !0;
+    if (btn.closest && btn.closest("bard-sidenav, .sidenav-with-history-container")) return !0;
+    if (btn.classList && btn.classList.contains("stop")) return !0;
+    if (btn.querySelector && btn.querySelector('mat-icon[fonticon="stop"], mat-icon[data-mat-icon-name="stop"], mat-icon[fonticon="mic"], mat-icon[data-mat-icon-name="mic"]')) return !0;
+    const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+    return aria.includes("stop") || aria.includes("dừng") || aria.includes("micro") || aria.includes("voice") || aria.includes("ghi âm") || aria.includes("feedback") || aria.includes("phản hồi");
+  };
+  const sendSelectors = [
+    'button[data-test-id="send-button"]',
+    'button[data-testid="send_button"]',
+    'button[aria-label*="Send" i]',
+    'button[aria-label*="Gửi" i]',
+    '.send-button-container button:has(mat-icon[fonticon="send"])',
+    '.send-button-container button:has(mat-icon[fonticon="arrow_upward"])',
+    "button.send-button",
+    ".send-button button",
+    ".send-button-container button"
+  ];
+  const findSendBtn = () => {
+    for (const sel of sendSelectors) {
+      try {
+        for (const btn of document.querySelectorAll(sel)) {
+          if (!isBlocked(btn) && isVisible(btn)) return btn;
+        }
+      } catch (_e) {}
+    }
+    for (const btn of document.querySelectorAll("button")) {
+      const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+      if ((aria.includes("send") || aria.includes("gửi")) && !isBlocked(btn) && isVisible(btn)) return btn;
+    }
+    return null;
+  };
+
+  const deadline = Date.now() + Math.max(2000, Number(maxWaitMs) || 15000);
+  let composer = null;
+  while (Date.now() < deadline) {
+    composer = findComposer();
+    if (composer) break;
+    await wait(60);
+  }
+  if (!composer) return { ok: !1, stage: "composer" };
+
+  while (composer.firstChild) composer.removeChild(composer.firstChild);
+  String(promptText || "").split("\n").forEach(line => {
+    const p = document.createElement("p");
+    if (line) p.textContent = line;
+    else p.appendChild(document.createElement("br"));
+    composer.appendChild(p);
+  });
+  composer.classList.remove("ql-blank");
+  composer.dispatchEvent(new Event("input", { bubbles: !0 }));
+  composer.dispatchEvent(new Event("change", { bubbles: !0 }));
+  if ("function" == typeof composer.focus) composer.focus();
+
+  const baselineResponses = document.querySelectorAll("model-response").length;
+  const baselineUserQueries = document.querySelectorAll("user-query").length;
+  await wait(80);
+
+  const submitDeadline = Math.min(deadline + 4000, Date.now() + 5000);
+  while (Date.now() < submitDeadline) {
+    const sendBtn = findSendBtn();
+    if (sendBtn) {
+      sendBtn.click();
+      return { ok: !0, baselineResponses, baselineUserQueries };
+    }
+    await wait(50);
+  }
+  return { ok: !1, stage: "submit" };
+}
+
+function sgWatchBgAiResponseInPage(watchId, baselineResponses = 0, timeoutMs = 120000) {
+  if ("function" == typeof window.__sgBgWatchCleanup) {
+    try { window.__sgBgWatchCleanup(); } catch (_e) {}
+  }
+  const blockTags = { p: 1, div: 1, br: 1, li: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, tr: 1 };
+  const skipClasses = ["thoughts-container", "thoughts-content", "thoughts-wrapper", "cdk-visually-hidden", "skip-button", "skip-button-label"];
+  const skipTags = { "model-thoughts": 1, "thinking-overlay": 1 };
+  const extractNodeText = root => {
+    if (!root) return "";
+    let out = "";
+    const walk = node => {
+      if (!node) return;
+      if (3 === node.nodeType) {
+        out += node.textContent || "";
+        return;
+      }
+      if (1 !== node.nodeType) return;
+      const tag = String(node.tagName || "").toLowerCase();
+      if (skipTags[tag]) return;
+      if (node.classList) {
+        for (const cls of skipClasses) {
+          if (node.classList.contains(cls)) return;
+        }
+      }
+      if (blockTags[tag] && out.length > 0 && !out.endsWith("\n")) out += "\n";
+      if ("li" === tag) out += "- ";
+      for (const ch of node.childNodes || []) walk(ch);
+      if (blockTags[tag] && !out.endsWith("\n")) out += "\n";
+    };
+    walk(root);
+    return out.trim();
+  };
+  const isGeneratingNow = () => {
+    const stopSels = ['mat-icon[fonticon="stop"]', 'mat-icon[data-mat-icon-name="stop"]', '[fonticon="stop"]', 'button[aria-label*="Stop" i]', 'button[aria-label*="Dừng" i]'];
+    for (const sel of stopSels) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (el && null !== el.offsetParent && !(el.closest && el.closest("bard-sidenav, .sidenav-with-history-container"))) {
+          return !0;
+        }
+      }
+    }
+    for (const el of document.querySelectorAll('.loading, .spinner, [aria-busy="true"]')) {
+      if (el && !(el.closest && el.closest("bard-sidenav, .sidenav-with-history-container"))) return !0;
+    }
+    return !1;
+  };
+  const extractLatest = () => {
+    const mrList = document.querySelectorAll("model-response");
+    if (mrList.length > baselineResponses) {
+      const targetMr = mrList[mrList.length - 1];
+      for (const sel of ["structured-content-container message-content .markdown-main-panel", "message-content .markdown-main-panel", ".markdown-main-panel", ".markdown", ".model-response-text", ".response-content"]) {
+        const nodes = targetMr.querySelectorAll(sel);
+        for (let i = nodes.length - 1; i >= 0; i--) {
+          if (nodes[i].closest && nodes[i].closest("thinking-overlay, model-thoughts, .thoughts-container, .thoughts-content, .thoughts-wrapper")) continue;
+          const txt = extractNodeText(nodes[i]);
+          if (txt) return txt;
+        }
+      }
+      const fallbackTxt = extractNodeText(targetMr);
+      if (fallbackTxt) return fallbackTxt;
+    }
+    if (0 === mrList.length && 0 === baselineResponses) {
+      for (const sel of ["structured-content-container message-content .markdown-main-panel", "message-content .markdown-main-panel", ".model-response-text"]) {
+        const list = document.querySelectorAll(sel);
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i].closest && list[i].closest("thinking-overlay, model-thoughts, .thoughts-container, .thoughts-content, .thoughts-wrapper")) continue;
+          const txt = extractNodeText(list[i]);
+          if (txt) return txt;
+        }
+      }
+      const rc = document.querySelector(".response-content");
+      if (rc) return extractNodeText(rc);
+    }
+    return "";
+  };
+
+  let done = !1;
+  let lastLen = 0;
+  let stableTicks = 0;
+  let debounceTimer = null;
+  let safetyInterval = null;
+  let timeoutTimer = null;
+  let observer = null;
+
+  const cleanup = () => {
+    done = !0;
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    if (safetyInterval) { clearInterval(safetyInterval); safetyInterval = null; }
+    if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+    if (observer) { try { observer.disconnect(); } catch (_e) {} observer = null; }
+    if (window.__sgBgWatchCleanup === cleanup) window.__sgBgWatchCleanup = null;
+  };
+  window.__sgBgWatchCleanup = cleanup;
+
+  const emitDone = response => {
+    cleanup();
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime && "function" == typeof chrome.runtime.sendMessage) {
+        Promise.resolve(chrome.runtime.sendMessage({
+          type: "SG_BG_WORKER_RESPONSE_EVENT",
+          watchId,
+          done: !0,
+          response
+        })).catch(() => {});
+      }
+    } catch (_e) {}
+  };
+
+  const evaluate = () => {
+    if (done) return;
+    const text = extractLatest();
+    if (!text) return;
+    if (text.length === lastLen) {
+      stableTicks++;
+      const generating = isGeneratingNow();
+      if ((stableTicks >= 2 && !generating) || stableTicks >= 10) {
+        emitDone(text);
+      }
+    } else {
+      lastLen = text.length;
+      stableTicks = 0;
+    }
+  };
+
+  const scheduleEval = () => {
+    if (done || debounceTimer) return;
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      evaluate();
+    }, 100);
+  };
+
+  if ("function" == typeof MutationObserver && document.body) {
+    observer = new MutationObserver(scheduleEval);
+    observer.observe(document.body, { childList: !0, subtree: !0, characterData: !0 });
+  }
+  safetyInterval = setInterval(evaluate, 220);
+  timeoutTimer = setTimeout(cleanup, Math.max(5000, Number(timeoutMs) || 120000));
+  scheduleEval();
+  return { ok: !0, mode: "observer", watchId };
+}
+
+async function sgPrepareBgAiWorkerTab(tabId, { reused = !1, abortedCheck = null } = {}) {
+  const ensureNotAborted = () => {
+    if ("function" == typeof abortedCheck && abortedCheck()) {
+      throw new Error("Task cancelled");
+    }
+  };
+  if (!reused) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: spoofFocus, world: "MAIN" });
+    } catch (_e) {}
+    await waitForTabLoad(tabId);
+    ensureNotAborted();
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: spoofFocus, world: "MAIN" });
+    } catch (_e) {}
+  } else {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: spoofFocus, world: "MAIN" });
+    } catch (_e) {}
+  }
+  ensureNotAborted();
+
+  let fastRes = null;
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: sgPrepareBgAiTabInPage,
+      args: [Boolean(reused), reused ? 7000 : 12000]
+    });
+    fastRes = res && res[0] ? res[0].result : null;
+  } catch (_e) {}
+  ensureNotAborted();
+
+  if (fastRes && "object" == typeof fastRes) {
+    if (fastRes.ok) return fastRes;
+    throw new Error("Failed to prepare Temporary Chat worker");
+  }
+
+  // Fallback for restricted/mocked executeScript environments
+  const sbStart = Date.now();
+  for (; Date.now() - sbStart < 5e3;) {
+    ensureNotAborted();
+    try {
+      const res = await chrome.scripting.executeScript({ target: { tabId }, func: openSidebarIfClosed });
+      const st = res && res[0] ? res[0].result : null;
+      if ("ALREADY_OPEN" === st || "OPENED" === st) {
+        "OPENED" === st && await sleep(200);
+        break;
+      }
+    } catch (_e) {}
+    await sleep(150);
+  }
+  const tcStart = Date.now();
+  for (; Date.now() - tcStart < 1e4;) {
+    ensureNotAborted();
+    try {
+      const res = await chrome.scripting.executeScript({ target: { tabId }, func: clickTemporaryChatButton });
+      if (res && res[0] && !0 === res[0].result) {
+        await sleep(400);
+        break;
+      }
+    } catch (_e) {}
+    await sleep(200);
+  }
+  return { ok: !0, fallback: !0, baselineResponses: 0, baselineUserQueries: 0 };
+}
+
+async function sgSubmitBgAiPrompt(tabId, fullPrompt, { abortedCheck = null } = {}) {
+  const ensureNotAborted = () => {
+    if ("function" == typeof abortedCheck && abortedCheck()) {
+      throw new Error("Task cancelled");
+    }
+  };
+  ensureNotAborted();
+
+  let fastRes = null;
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: sgEnterAndSubmitBgAiPromptInPage,
+      args: [fullPrompt, 15000]
+    });
+    fastRes = res && res[0] ? res[0].result : null;
+  } catch (_e) {}
+  ensureNotAborted();
+
+  if (fastRes && "object" == typeof fastRes) {
+    if (fastRes.ok) return fastRes;
+    throw new Error("composer" === fastRes.stage ? "Failed to enter prompt (timeout)" : "Submit button not found");
+  }
+
+  // Fallback for restricted/mocked executeScript environments
+  const entStart = Date.now();
+  let entered = !1;
+  for (; Date.now() - entStart < 15e3;) {
+    ensureNotAborted();
+    try {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: enterPrompt,
+        args: [fullPrompt]
+      });
+      if (res && res[0] && !0 === res[0].result) {
+        entered = !0;
+        break;
+      }
+    } catch (_e) {}
+    await sleep(200);
+  }
+  if (!entered) throw new Error("Failed to enter prompt (timeout)");
+  await sleep(200);
+  ensureNotAborted();
+  await chrome.scripting.executeScript({ target: { tabId }, func: clickSubmit });
+  return { ok: !0, fallback: !0, baselineResponses: 0, baselineUserQueries: 0 };
+}
+
+async function sgAwaitBgAiResponse(tabId, timeoutMs = 60000, { baselineResponses = 0, abortedCheck = null } = {}) {
+  const watchId = `bgw_${tabId}_${Date.now()}_${++_sgBgWatchSeq}`;
+  let resolveWaiter, rejectWaiter;
+  const waiterPromise = new Promise((resolve, reject) => {
+    resolveWaiter = resolve;
+    rejectWaiter = reject;
+  });
+  _sgBgResponseWaiters.set(watchId, { tabId, resolve: resolveWaiter, reject: rejectWaiter });
+
+  let watchStarted = null;
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: sgWatchBgAiResponseInPage,
+      args: [watchId, Number(baselineResponses) || 0, timeoutMs]
+    });
+    watchStarted = res && res[0] ? res[0].result : null;
+  } catch (_e) {}
+
+  if (!watchStarted || !watchStarted.ok) {
+    _sgBgResponseWaiters.delete(watchId);
+    return await pollForResponse(tabId, timeoutMs);
+  }
+
+  let finished = !1;
+  let timeoutTimer = null;
+  let abortTimer = null;
+  let backupTimer = null;
+  let lastBackupLen = 0;
+  let backupStableTicks = 0;
+
+  const raceControlPromise = new Promise((_resolve, reject) => {
+    timeoutTimer = setTimeout(() => {
+      if (!finished) reject(new Error("Optimization timeout"));
+    }, timeoutMs);
+    if ("function" == typeof abortedCheck) {
+      abortTimer = setInterval(() => {
+        if (!finished && abortedCheck()) {
+          reject(new Error("Task cancelled"));
+        }
+      }, 150);
+    }
+    backupTimer = setInterval(async () => {
+      if (finished) return;
+      try {
+        const res = await chrome.scripting.executeScript({ target: { tabId }, func: checkResponseStatus });
+        const info = res && res[0] ? res[0].result : null;
+        if (info && info.response && info.response.length > 0) {
+          if (info.response.length === lastBackupLen) {
+            backupStableTicks++;
+            if ((!info.isGenerating && backupStableTicks >= 1) || backupStableTicks >= 4) {
+              resolveWaiter(info.response);
+            }
+          } else {
+            lastBackupLen = info.response.length;
+            backupStableTicks = 0;
+          }
+        }
+      } catch (_e) {}
+    }, 3000);
+  });
+
+  try {
+    return await Promise.race([waiterPromise, raceControlPromise]);
+  } finally {
+    finished = !0;
+    _sgBgResponseWaiters.delete(watchId);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (abortTimer) clearInterval(abortTimer);
+    if (backupTimer) clearInterval(backupTimer);
+  }
+}
+
+async function sgRunSingleShotBgAiTask({
+  srcTabId,
+  profile,
+  config = null,
+  buildPrompt,
+  onTabAcquired = null,
+  onTabReleased = null,
+  abortedCheck = null
+}) {
+  if (!srcTabId) throw new Error("No source tab ID provided");
+  const srcTab = await chrome.tabs.get(srcTabId);
+  const accountUrl = geminiAppUrlForTab(srcTab);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let tabId = null;
+    let released = !1;
+    try {
+      const acq = await sgAcquireHiddenBgAiTab(accountUrl, srcTab);
+      tabId = acq.tabId;
+      if ("function" == typeof onTabAcquired) onTabAcquired(tabId);
+
+      let prepInfo = null;
+      try {
+        prepInfo = await sgPrepareBgAiWorkerTab(tabId, { reused: acq.reused, abortedCheck });
+      } catch (prepErr) {
+        const isAborted = Boolean("function" == typeof abortedCheck && abortedCheck());
+        if (acq.reused && !isAborted && 0 === attempt) {
+          released = !0;
+          const badId = tabId;
+          tabId = null;
+          if ("function" == typeof onTabReleased) onTabReleased(badId);
+          await sgReleaseHiddenBgAiTab(badId, { keepWarm: !1, unhealthy: !0 });
+          continue;
+        }
+        throw prepErr;
+      }
+
+      if ("function" == typeof abortedCheck && abortedCheck()) throw new Error("Task cancelled");
+      const actualModel = await sgApplyModelProfileInTab(tabId, profile, { abortedCheck, config });
+      if ("function" == typeof abortedCheck && abortedCheck()) throw new Error("Task cancelled");
+
+      const fullPrompt = await buildPrompt();
+      const submitInfo = await sgSubmitBgAiPrompt(tabId, fullPrompt, { abortedCheck });
+      if ("function" == typeof abortedCheck && abortedCheck()) throw new Error("Task cancelled");
+
+      const baselineResponses = submitInfo && "number" == typeof submitInfo.baselineResponses
+        ? submitInfo.baselineResponses
+        : (prepInfo && "number" == typeof prepInfo.baselineResponses ? prepInfo.baselineResponses : 0);
+      const rawResp = await sgAwaitBgAiResponse(tabId, (profile && profile.timeoutMs) || 6e4, {
+        baselineResponses,
+        abortedCheck
+      });
+      if ("function" == typeof abortedCheck && abortedCheck()) throw new Error("Task cancelled");
+
+      released = !0;
+      const doneId = tabId;
+      tabId = null;
+      if ("function" == typeof onTabReleased) onTabReleased(doneId);
+      await sgReleaseHiddenBgAiTab(doneId, { keepWarm: !0, accountUrl });
+      return { rawResponse: rawResp, actualModel, reused: acq.reused };
+    } finally {
+      if (!released && "number" == typeof tabId) {
+        const badId = tabId;
+        tabId = null;
+        if ("function" == typeof onTabReleased) onTabReleased(badId);
+        await sgReleaseHiddenBgAiTab(badId, { keepWarm: !1, unhealthy: !0 });
+      }
+    }
+  }
+  throw new Error("Failed to acquire healthy background AI worker");
+}
+
 async function handleOptimizePrompt(e, t) {
   const {
     prompt: n,
@@ -1921,7 +2719,6 @@ async function handleOptimizePrompt(e, t) {
     hasVariables: i,
     isChainStep: s
   } = e;
-  let l = null;
   const d = await chrome.storage.sync.get(["optimizeModel", "customOptimizePrompt", "customFollowupPrompt"]),
     h = d.customOptimizePrompt || null,
     f = d.customFollowupPrompt || null;
@@ -1939,139 +2736,37 @@ async function handleOptimizePrompt(e, t) {
   try {
     const c = t?.tab?.id;
     if (!c) throw new Error("No source tab ID provided for optimization");
-    const srcTab = await chrome.tabs.get(c);
-    l = await sgCreateHiddenBgAiTab(geminiAppUrlForTab(srcTab) + "#sg_bg_worker=1", srcTab);
-    try {
-      await chrome.scripting.executeScript({
-        target: {
-          tabId: l
-        },
-        func: spoofFocus,
-        world: "MAIN"
-      })
-    } catch (e) {}
-    await waitForTabLoad(l), await chrome.scripting.executeScript({
-      target: {
-        tabId: l
-      },
-      func: spoofFocus,
-      world: "MAIN"
-    });
-    let r, curMode = null;
-    {
-      const e = Date.now(),
-        t = 5e3;
-      for (; Date.now() - e < t;) {
-        try {
-          const e = await chrome.scripting.executeScript({
-              target: {
-                tabId: l
-              },
-              func: openSidebarIfClosed
-            }),
-            t = e && e[0] ? e[0].result : null;
-          if ("ALREADY_OPEN" === t || "OPENED" === t) {
-            "OPENED" === t && await sleep(200);
-            break
-          }
-        } catch (e) {}
-        await sleep(150)
-      }
-      const n = Date.now(),
-        r = 1e4;
-      for (; Date.now() - n < r;) {
-        try {
-          const e = await chrome.scripting.executeScript({
-            target: {
-              tabId: l
-            },
-            func: clickTemporaryChatButton
-          });
-          if (e && e[0] && !0 === e[0].result) {
-            await sleep(400);
-            break
-          }
-        } catch (e) {}
-        await sleep(200)
-      }
-      try {
-        const e = await chrome.scripting.executeScript({
-          target: {
-            tabId: l
-          },
-          func: getCurrentModeName
-        });
-        curMode = e && e[0] ? e[0].result : null
-      } catch (e) {}
-      await sgApplyModelProfileInTab(l, optProfile, { config: routingRes.config });
-    }
-    if (s && o && a && a.previousSteps) {
-      let e = a.previousSteps.map(e => `[Step ${e.stepNumber}]\n${e.prompt}`).join("\n\n");
-      r = CHAIN_STEP_SYSTEM_PROMPT.replace("{PREVIOUS_STEPS}", () => e).replace(/{CURRENT_STEP}/g, () => a.currentStepNumber.toString()) + n
-    } else if (o && a) {
-      let e = "(No first exchange available)";
-      a.firstExchange && (e = `User: ${a.firstExchange.userPrompt}\nAI: ${a.firstExchange.aiResponse}`);
-      let t = "(No recent exchanges available)";
-      a.recentExchanges && a.recentExchanges.length > 0 && (t = a.recentExchanges.map((e, t) => `[Exchange ${t+1}]\nUser: ${e.userPrompt}\nAI: ${e.aiResponse}`).join("\n\n"));
-      r = (f || FOLLOWUP_SYSTEM_PROMPT).replace("{FIRST_EXCHANGE}", () => e).replace("{RECENT_EXCHANGES}", () => t) + n
-    } else {
-      const e = i ? "- If the input prompt includes variables like {{variable_name}}, preserve them exactly in the output.\n" : "";
-      r = sgWrapPromptFence((h || OPTIMIZATION_SYSTEM_PROMPT).replace("{VARIABLE_RULE}", () => e), n)
-    }
-    const p = Date.now(),
-      g = 15e3;
-    let E = !1;
-    for (; Date.now() - p < g;) {
-      try {
-        const e = await chrome.scripting.executeScript({
-          target: {
-            tabId: l
-          },
-          func: enterPrompt,
-          args: [r]
-        });
-        if (e && e[0] && !0 === e[0].result) {
-          E = !0;
-          break
+    const taskRes = await sgRunSingleShotBgAiTask({
+      srcTabId: c,
+      profile: optProfile,
+      config: routingRes.config,
+      buildPrompt: () => {
+        if (s && o && a && a.previousSteps) {
+          const stepsTxt = a.previousSteps.map(step => `[Step ${step.stepNumber}]\n${step.prompt}`).join("\n\n");
+          return CHAIN_STEP_SYSTEM_PROMPT.replace("{PREVIOUS_STEPS}", () => stepsTxt).replace(/{CURRENT_STEP}/g, () => a.currentStepNumber.toString()) + n;
         }
-      } catch (e) {}
-      await sleep(200)
-    }
-    if (!E) throw new Error("Failed to enter prompt (timeout)");
-    await sleep(200), await chrome.scripting.executeScript({
-      target: {
-        tabId: l
-      },
-      func: clickSubmit
+        if (o && a) {
+          let firstTxt = "(No first exchange available)";
+          a.firstExchange && (firstTxt = `User: ${a.firstExchange.userPrompt}\nAI: ${a.firstExchange.aiResponse}`);
+          let recentTxt = "(No recent exchanges available)";
+          a.recentExchanges && a.recentExchanges.length > 0 && (recentTxt = a.recentExchanges.map((ex, idx) => `[Exchange ${idx + 1}]\nUser: ${ex.userPrompt}\nAI: ${ex.aiResponse}`).join("\n\n"));
+          return (f || FOLLOWUP_SYSTEM_PROMPT).replace("{FIRST_EXCHANGE}", () => firstTxt).replace("{RECENT_EXCHANGES}", () => recentTxt) + n;
+        }
+        const varRule = i ? "- If the input prompt includes variables like {{variable_name}}, preserve them exactly in the output.\n" : "";
+        return sgWrapPromptFence((h || OPTIMIZATION_SYSTEM_PROMPT).replace("{VARIABLE_RULE}", () => varRule), n);
+      }
     });
-    const b = optProfile.timeoutMs || 6e4;
-    let y = await pollForResponse(l, b);
-    if (y) y = cleanOptimizedPrompt(y);
-    const doneTabId = l;
-    l = null;
-    await sgCloseHiddenBgAiTab(doneTabId);
-    return y ? {
-      success: !0,
-      optimizedPrompt: y
-    } : {
-      success: !1,
-      error: "Could not extract response"
-    };
-  } catch (e) {
+    const y = taskRes && taskRes.rawResponse ? cleanOptimizedPrompt(taskRes.rawResponse) : "";
+    return y ? { success: !0, optimizedPrompt: y } : { success: !1, error: "Could not extract response" };
+  } catch (err) {
     if ("function" == typeof sgRecordWorkerDiag) {
-      sgRecordWorkerDiag("opt", "error", "OPT_FAILED", e && e.message || e);
+      sgRecordWorkerDiag("opt", "error", "OPT_FAILED", err && err.message || err);
     }
-    console.error("[Gemini Power Suite] Optimization failed: ❌", e);
+    console.error("[Gemini Power Suite] Optimization failed: ❌", err);
     return {
       success: !1,
-      error: e.message
+      error: err.message
     };
-  } finally {
-    if (l) {
-      const cleanupId = l;
-      l = null;
-      await sgCloseHiddenBgAiTab(cleanupId);
-    }
   }
 }
 
@@ -2092,101 +2787,28 @@ function geminiAppUrlForTab(e) {
 }
 async function handleFixGrammar(e, t) {
   const { prompt: n } = e;
-  let o = null;
   try {
     const c = t?.tab?.id;
     if (!c) throw new Error("No source tab ID provided for grammar fix");
-    const srcTab = await chrome.tabs.get(c);
-    o = await sgCreateHiddenBgAiTab(geminiAppUrlForTab(srcTab) + "#sg_bg_worker=1", srcTab);
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: o },
-        func: spoofFocus,
-        world: "MAIN"
-      });
-    } catch (e) {}
-    await waitForTabLoad(o);
-    await chrome.scripting.executeScript({
-      target: { tabId: o },
-      func: spoofFocus,
-      world: "MAIN"
-    });
-    const a = Date.now(), i = 5e3;
-    for (; Date.now() - a < i;) {
-      try {
-        const e = await chrome.scripting.executeScript({
-          target: { tabId: o },
-          func: openSidebarIfClosed
-        });
-        const t = e && e[0] ? e[0].result : null;
-        if ("ALREADY_OPEN" === t || "OPENED" === t) {
-          "OPENED" === t && await sleep(200);
-          break;
-        }
-      } catch (e) {}
-      await sleep(150);
-    }
-    const s = Date.now(), cl = 1e4;
-    for (; Date.now() - s < cl;) {
-      try {
-        const e = await chrome.scripting.executeScript({
-          target: { tabId: o },
-          func: clickTemporaryChatButton
-        });
-        if (e && e[0] && !0 === e[0].result) {
-          await sleep(400);
-          break;
-        }
-      } catch (e) {}
-      await sleep(200);
-    }
     const routingRes = await sgGetModelRoutingConfig();
     const routingApi = globalThis.SGModelRouting;
     const grammarProfile = routingApi && typeof routingApi.resolveGrammarProfile === "function"
       ? routingApi.resolveGrammarProfile(routingRes.config)
       : { model: "hydrogen", thinkingLevel: "low", timeoutMs: 6e4, selectionPayload: null };
-    await sgApplyModelProfileInTab(o, grammarProfile, { config: routingRes.config });
-    const m = sgWrapPromptFence(GRAMMAR_SYSTEM_PROMPT, n);
-    const p = Date.now(), h = 15e3;
-    let f = !1;
-    for (; Date.now() - p < h;) {
-      try {
-        const e = await chrome.scripting.executeScript({
-          target: { tabId: o },
-          func: enterPrompt,
-          args: [m]
-        });
-        if (e && e[0] && !0 === e[0].result) {
-          f = !0;
-          break;
-        }
-      } catch (e) {}
-      await sleep(200);
-    }
-    if (!f) throw new Error("Failed to enter prompt (timeout)");
-    await sleep(200);
-    await chrome.scripting.executeScript({
-      target: { tabId: o },
-      func: clickSubmit
+    const taskRes = await sgRunSingleShotBgAiTask({
+      srcTabId: c,
+      profile: grammarProfile,
+      config: routingRes.config,
+      buildPrompt: () => sgWrapPromptFence(GRAMMAR_SYSTEM_PROMPT, n)
     });
-    let g = await pollForResponse(o, grammarProfile.timeoutMs || 6e4);
-    if (g) g = cleanOptimizedPrompt(g);
-    const doneTabId = o;
-    o = null;
-    await sgCloseHiddenBgAiTab(doneTabId);
+    const g = taskRes && taskRes.rawResponse ? cleanOptimizedPrompt(taskRes.rawResponse) : "";
     return g ? { success: !0, correctedText: g } : { success: !1, error: "Could not extract response" };
-  } catch (e) {
+  } catch (err) {
     if ("function" == typeof sgRecordWorkerDiag) {
-      sgRecordWorkerDiag("grammar", "error", "GRAMMAR_FAILED", e && e.message || e);
+      sgRecordWorkerDiag("grammar", "error", "GRAMMAR_FAILED", err && err.message || err);
     }
-    console.error("[Gemini Power Suite] Grammar fix failed: ❌", e);
-    return { success: !1, error: e.message };
-  } finally {
-    if (o) {
-      const cleanupId = o;
-      o = null;
-      await sgCloseHiddenBgAiTab(cleanupId);
-    }
+    console.error("[Gemini Power Suite] Grammar fix failed: ❌", err);
+    return { success: !1, error: err.message };
   }
 }
 
@@ -2205,7 +2827,8 @@ async function handleCancelCheckpointSummary() {
   const tid = _activeCheckpointTabId;
   _activeCheckpointTabId = null;
   if ("number" == typeof tid) {
-    await sgCloseHiddenBgAiTab(tid);
+    sgRejectBgWaitersForTab(tid, "Checkpoint summary cancelled");
+    await sgReleaseHiddenBgAiTab(tid, { keepWarm: !1, unhealthy: !0 });
   }
   return { ok: !0 };
 }
@@ -2225,122 +2848,61 @@ async function handleGenerateCheckpointSummary(e, t) {
   const customFocus = e && typeof e.customFocus === "string" ? e.customFocus.trim().slice(0, 600) : "";
   const turnNumbers = Array.isArray(e && e.turnNumbers) ? e.turnNumbers.slice(0, 64) : [];
 
-  let cpTabId = null;
   const routingRes = await sgGetModelRoutingConfig().catch(() => ({ config: null }));
   const routingApi = globalThis.SGModelRouting;
   const cpProfile = routingApi && typeof routingApi.resolveCheckpointProfile === "function"
     ? routingApi.resolveCheckpointProfile(routingRes && routingRes.config)
     : { model: "hydrogen", thinkingLevel: "high", timeoutMs: 12e4, selectionPayload: null };
 
+  let ownedTabId = null;
   try {
     const srcTabId = t?.tab?.id;
     if (!srcTabId) throw new Error("No source tab ID provided for checkpoint summary");
-    const srcTab = await chrome.tabs.get(srcTabId);
-    cpTabId = await sgCreateHiddenBgAiTab(geminiAppUrlForTab(srcTab) + "#sg_bg_worker=1", srcTab);
-    _activeCheckpointTabId = cpTabId;
-
-    try {
-      await chrome.scripting.executeScript({ target: { tabId: cpTabId }, func: spoofFocus, world: "MAIN" });
-    } catch (_e) {}
-    await waitForTabLoad(cpTabId);
-    await chrome.scripting.executeScript({ target: { tabId: cpTabId }, func: spoofFocus, world: "MAIN" });
-
-    const sbStart = Date.now();
-    for (; Date.now() - sbStart < 5e3;) {
-      try {
-        const res = await chrome.scripting.executeScript({ target: { tabId: cpTabId }, func: openSidebarIfClosed });
-        const st = res && res[0] ? res[0].result : null;
-        if ("ALREADY_OPEN" === st || "OPENED" === st) {
-          "OPENED" === st && await sleep(200);
-          break;
+    const taskRes = await sgRunSingleShotBgAiTask({
+      srcTabId,
+      profile: cpProfile,
+      config: routingRes && routingRes.config ? routingRes.config : null,
+      onTabAcquired: tid => {
+        ownedTabId = tid;
+        _activeCheckpointTabId = tid;
+      },
+      onTabReleased: tid => {
+        if (ownedTabId === tid) ownedTabId = null;
+        if (_activeCheckpointTabId === tid) _activeCheckpointTabId = null;
+      },
+      abortedCheck: () => ownedTabId !== null && _activeCheckpointTabId !== ownedTabId,
+      buildPrompt: () => {
+        const headerParts = [
+          CHECKPOINT_SUMMARY_SYSTEM_PROMPT,
+          `SOURCE CONVERSATION: ${sourceTitle}${turnNumbers.length ? ` (Turns #${turnNumbers.join(", #")})` : ""}`
+        ];
+        if (customFocus) {
+          headerParts.push(`EXTRA COMPACTION FOCUS: ${customFocus}`);
         }
-      } catch (_e) {}
-      await sleep(150);
-    }
-
-    const tcStart = Date.now();
-    for (; Date.now() - tcStart < 1e4;) {
-      try {
-        const res = await chrome.scripting.executeScript({ target: { tabId: cpTabId }, func: clickTemporaryChatButton });
-        if (res && res[0] && !0 === res[0].result) {
-          await sleep(400);
-          break;
-        }
-      } catch (_e) {}
-      await sleep(200);
-    }
-
-    const actualModel = await sgApplyModelProfileInTab(cpTabId, cpProfile, {
-      abortedCheck: () => _activeCheckpointTabId !== cpTabId,
-      config: routingRes && routingRes.config ? routingRes.config : null
+        headerParts.push("TRANSCRIPT DATA TO COMPACT:");
+        return sgWrapPromptFence(headerParts.join("\n"), transcript);
+      }
     });
-    if (_activeCheckpointTabId !== cpTabId) {
-      throw new Error("Checkpoint summary cancelled");
-    }
-
-    const headerParts = [
-      CHECKPOINT_SUMMARY_SYSTEM_PROMPT,
-      `SOURCE CONVERSATION: ${sourceTitle}${turnNumbers.length ? ` (Turns #${turnNumbers.join(", #")})` : ""}`
-    ];
-    if (customFocus) {
-      headerParts.push(`EXTRA COMPACTION FOCUS: ${customFocus}`);
-    }
-    headerParts.push("TRANSCRIPT DATA TO COMPACT:");
-    const fullPrompt = sgWrapPromptFence(headerParts.join("\n"), transcript);
-
-    const entStart = Date.now();
-    let entered = !1;
-    for (; Date.now() - entStart < 15e3;) {
-      if (_activeCheckpointTabId !== cpTabId) throw new Error("Checkpoint summary cancelled");
-      try {
-        const res = await chrome.scripting.executeScript({
-          target: { tabId: cpTabId },
-          func: enterPrompt,
-          args: [fullPrompt]
-        });
-        if (res && res[0] && !0 === res[0].result) {
-          entered = !0;
-          break;
-        }
-      } catch (_e) {}
-      await sleep(200);
-    }
-    if (!entered) throw new Error("Failed to enter checkpoint prompt (timeout)");
-
-    await sleep(200);
-    await chrome.scripting.executeScript({ target: { tabId: cpTabId }, func: clickSubmit });
-
-    const rawResp = await pollForResponse(cpTabId, cpProfile.timeoutMs || 12e4);
-    if (_activeCheckpointTabId !== cpTabId) {
-      throw new Error("Checkpoint summary cancelled");
-    }
-    const summary = cleanCheckpointSummaryText(rawResp);
-    const doneTabId = cpTabId;
-    cpTabId = null;
-    if (_activeCheckpointTabId === doneTabId) _activeCheckpointTabId = null;
-    await sgCloseHiddenBgAiTab(doneTabId);
-
+    const summary = taskRes && taskRes.rawResponse ? cleanCheckpointSummaryText(taskRes.rawResponse) : "";
     return summary
       ? {
           success: !0,
           summary,
-          model: actualModel || cpProfile.model,
+          model: (taskRes && taskRes.actualModel) || cpProfile.model,
           thinkingLevel: cpProfile.thinkingLevel || "high"
         }
       : { success: !1, error: "Could not extract checkpoint summary response" };
   } catch (err) {
-    const errMsg = String(err && err.message || err);
+    const rawMsg = String(err && err.message || err);
+    const errMsg = "Task cancelled" === rawMsg ? "Checkpoint summary cancelled" : rawMsg;
     if ("function" == typeof sgRecordWorkerDiag) {
       sgRecordWorkerDiag("checkpoint", "error", "CHECKPOINT_FAILED", errMsg);
     }
     console.error("[Gemini Power Suite] Checkpoint summary failed:", err);
     return { success: !1, error: errMsg };
   } finally {
-    if ("number" == typeof cpTabId) {
-      const cleanupId = cpTabId;
-      cpTabId = null;
-      if (_activeCheckpointTabId === cleanupId) _activeCheckpointTabId = null;
-      await sgCloseHiddenBgAiTab(cleanupId);
+    if ("number" == typeof ownedTabId && _activeCheckpointTabId === ownedTabId) {
+      _activeCheckpointTabId = null;
     }
   }
 }
@@ -3221,6 +3783,26 @@ async function sgHandleOrchIdleAlarm(alarm) {
     }
     return;
   }
+  if (alarm.name === SG_BG_AI_IDLE_ALARM_NAME) {
+    if (_sgBgAiLeasedTabIds.size > 0 || _sgBgAiPendingCreates > 0) return;
+    if (_sgBgAiWarmTab || "number" == typeof _sgBgAiWorkerWindowId) {
+      await sgDestroyWarmBgAiPool();
+      return;
+    }
+    const optTabs = await sgDrainTrackedTempTabs("opt");
+    if (chrome.tabs && "function" == typeof chrome.tabs.remove) {
+      for (const tid of optTabs) {
+        try { await chrome.tabs.remove(tid); } catch (_e) {}
+      }
+    }
+    const bgWins = await sgDrainTrackedBgAiWindows();
+    if (chrome.windows && "function" == typeof chrome.windows.remove) {
+      for (const wid of bgWins) {
+        try { await chrome.windows.remove(wid); } catch (_e) {}
+      }
+    }
+    return;
+  }
   if (alarm.name === SG_SW_ORPHAN_SWEEP_ALARM) {
     await sgCleanupOrphanedOrchWorkersOnBoot();
   }
@@ -3583,64 +4165,78 @@ async function sgBootOrchWorkerTab(pool, slot) {
       });
     } catch (_e) {}
 
-    const sbStart = Date.now();
-    for (; Date.now() - sbStart < 4500 && !pool.aborted;) {
-      try {
-        const res = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: openSidebarIfClosed
-        });
-        const status = res && res[0] ? res[0].result : null;
-        if ("ALREADY_OPEN" === status || "OPENED" === status) {
-          "OPENED" === status && await sleep(220);
-          break;
-        }
-      } catch (e) {}
-      await sleep(140);
-    }
+    let fastPrepared = !1;
+    try {
+      const fastRes = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: sgPrepareBgAiTabInPage,
+        args: [!1, 10e3]
+      });
+      if (fastRes && fastRes[0] && fastRes[0].result && fastRes[0].result.ok) {
+        fastPrepared = !0;
+      }
+    } catch (_e) {}
 
-    const tempStart = Date.now();
-    let clickedTempAt = 0;
-    for (; Date.now() - tempStart < 8e3 && !pool.aborted;) {
-      try {
-        const res = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: sgCheckOrResetTempChatInTab,
-          args: [!1, 0 === clickedTempAt]
-        });
-        const status = res && res[0] ? res[0].result : null;
-        if ("TEMP_READY" === status) {
-          if (clickedTempAt > 0) await sleep(220);
-          break;
-        }
-        if ("CLICKED_TEMP" === status) {
-          clickedTempAt = Date.now();
-          await sleep(320);
-          continue;
-        }
-        if (clickedTempAt > 0 && Date.now() - clickedTempAt > 3e3) break;
-      } catch (e) {}
-      await sleep(180);
-    }
-
-    // Wait briefly until Quill composer is mounted and ready inside the worker tab
-    const compStart = Date.now();
-    for (; Date.now() - compStart < 6e3 && !pool.aborted;) {
-      try {
-        const res = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => {
-            if (document.body) {
-              document.body.dataset.sgBgWorker = "true";
-              document.body.classList.remove("sg-periodic-send-blocked");
-            }
-            const el = document.querySelector('rich-textarea .ql-editor, .ql-editor[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
-            return Boolean(el && el.isConnected);
+    if (!fastPrepared) {
+      const sbStart = Date.now();
+      for (; Date.now() - sbStart < 4500 && !pool.aborted;) {
+        try {
+          const res = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: openSidebarIfClosed
+          });
+          const status = res && res[0] ? res[0].result : null;
+          if ("ALREADY_OPEN" === status || "OPENED" === status) {
+            "OPENED" === status && await sleep(220);
+            break;
           }
-        });
-        if (res && res[0] && !0 === res[0].result) break;
-      } catch (e) {}
-      await sleep(160);
+        } catch (e) {}
+        await sleep(140);
+      }
+
+      const tempStart = Date.now();
+      let clickedTempAt = 0;
+      for (; Date.now() - tempStart < 8e3 && !pool.aborted;) {
+        try {
+          const res = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: sgCheckOrResetTempChatInTab,
+            args: [!1, 0 === clickedTempAt]
+          });
+          const status = res && res[0] ? res[0].result : null;
+          if ("TEMP_READY" === status) {
+            if (clickedTempAt > 0) await sleep(220);
+            break;
+          }
+          if ("CLICKED_TEMP" === status) {
+            clickedTempAt = Date.now();
+            await sleep(320);
+            continue;
+          }
+          if (clickedTempAt > 0 && Date.now() - clickedTempAt > 3e3) break;
+        } catch (e) {}
+        await sleep(180);
+      }
+
+      // Wait briefly until Quill composer is mounted and ready inside the worker tab
+      const compStart = Date.now();
+      for (; Date.now() - compStart < 6e3 && !pool.aborted;) {
+        try {
+          const res = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              if (document.body) {
+                document.body.dataset.sgBgWorker = "true";
+                document.body.classList.remove("sg-periodic-send-blocked");
+              }
+              const el = document.querySelector('rich-textarea .ql-editor, .ql-editor[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
+              return Boolean(el && el.isConnected);
+            }
+          });
+          if (res && res[0] && !0 === res[0].result) break;
+        } catch (e) {}
+        await sleep(160);
+      }
     }
 
     return tabId;
@@ -3654,6 +4250,18 @@ async function sgBootOrchWorkerTab(pool, slot) {
 }
 
 async function sgResetOrchWarmWorkerTab(pool, tabId) {
+  try {
+    const fastRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: sgPrepareBgAiTabInPage,
+      args: [!0, 6e3]
+    });
+    const resObj = fastRes && fastRes[0] ? fastRes[0].result : null;
+    if (resObj && "object" == typeof resObj) {
+      return Boolean(resObj.ok);
+    }
+  } catch (_e) {}
+
   const start = Date.now();
   for (; Date.now() - start < 4500 && !pool.aborted;) {
     try {

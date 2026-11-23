@@ -57,6 +57,8 @@ let _sgSidebarFilterObserver = null,
   _sgSidebarFilterRetryTimer = null,
   _sgSidebarFilterInterval = null;
 
+let _sgSidebarFilterVisHandler = null;
+
 function stopSidebarFilterWatchers() {
   if (_sgSidebarFilterObserver) {
     _sgSidebarFilterObserver.disconnect();
@@ -70,9 +72,14 @@ function stopSidebarFilterWatchers() {
     clearInterval(_sgSidebarFilterInterval);
     _sgSidebarFilterInterval = null;
   }
+  if (_sgSidebarFilterVisHandler && "undefined" != typeof document && "function" == typeof document.removeEventListener) {
+    document.removeEventListener("visibilitychange", _sgSidebarFilterVisHandler);
+    _sgSidebarFilterVisHandler = null;
+  }
 }
 
 function startSidebarFilterWatchers() {
+  if (SG_IS_SILENT_BG_WORKER_TAB) return;
   stopSidebarFilterWatchers();
   const bindObserver = () => {
     const list = domQuery("conversationsList");
@@ -90,9 +97,34 @@ function startSidebarFilterWatchers() {
       if (isFoldersFeatureEnabled) bindObserver();
     }, 3e3);
   }
-  _sgSidebarFilterInterval = setInterval(() => {
-    document.hidden || applySidebarFiltering();
-  }, 3e4);
+  const syncFilterInterval = () => {
+    if ("undefined" != typeof document && document.hidden) {
+      if (_sgSidebarFilterInterval) {
+        clearInterval(_sgSidebarFilterInterval);
+        _sgSidebarFilterInterval = null;
+      }
+      return;
+    }
+    if (!isFoldersFeatureEnabled) return;
+    _sgSidebarFilterInterval || (_sgSidebarFilterInterval = setInterval(() => {
+      if (document.hidden) {
+        clearInterval(_sgSidebarFilterInterval);
+        _sgSidebarFilterInterval = null;
+        return;
+      }
+      applySidebarFiltering();
+    }, 3e4));
+  };
+  _sgSidebarFilterVisHandler = () => {
+    if ("undefined" != typeof document && document.hidden) {
+      syncFilterInterval();
+    } else if (isFoldersFeatureEnabled) {
+      applySidebarFiltering();
+      syncFilterInterval();
+    }
+  };
+  "undefined" != typeof document && "function" == typeof document.addEventListener && document.addEventListener("visibilitychange", _sgSidebarFilterVisHandler);
+  syncFilterInterval();
 }
 let sidebarLoadMoreTimeout = null,
   sidebarLoadMoreRetries = 0,

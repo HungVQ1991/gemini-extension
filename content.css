@@ -7316,6 +7316,27 @@ body.dark-theme .sg-diagram-error-banner {
   display: none !important;
 }
 
+.sg-diagram-lazy-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 6px 0 8px;
+  border: 1px dashed var(--sg-outline, #3c4043);
+  border-radius: 10px;
+  background: var(--sg-surface-variant, #242527);
+  color: var(--sg-on-surface-variant, #9aa0a6);
+  font-size: 12px;
+}
+
+.sg-diagram-lazy-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .sg-diagram-iframe {
   display: block;
   width: 100%;
@@ -7925,6 +7946,7 @@ body:not(.dark-theme) .sg-orch-review-run-btn {
   .sg-cb-expand-bar,
   .sg-cb-fallback-header,
   .sg-diagram-toolbar,
+  .sg-diagram-lazy-placeholder,
   .sg-diagram-error-banner,
   .sg-diagram-fullscreen-overlay {
     display: none !important;

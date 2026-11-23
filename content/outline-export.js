@@ -20,6 +20,19 @@ let _sgOutlineUiState = {
   filterText: ""
 };
 const _sgTurnIndexCache = new Map();
+const _sgOutlineSettledTurnCache = new WeakMap();
+const _sgOutlineDirtyContainers = new WeakSet();
+let _sgForkInjectedResponses = new WeakSet();
+
+function sgOutlineMarkTurnDirty(node) {
+  let cur = node;
+  while (cur && cur.nodeType && cur.nodeType !== 1) cur = cur.parentNode;
+  if (!cur) return;
+  const container = typeof cur.closest === "function"
+    ? (cur.closest(".conversation-container") || cur.closest("model-response, user-query"))
+    : null;
+  if (container) _sgOutlineDirtyContainers.add(container);
+}
 let _sgOutlineRoot = null;
 let _sgOutlineListEl = null;
 let _sgOutlineCountBadge = null;
@@ -451,7 +464,7 @@ function sgTrimTurnCacheIfNeeded() {
   }
 }
 
-function sgScanConversationTurns() {
+function sgScanConversationTurns(force = false) {
   if (sgShouldSuppressOutlineSurface()) return [];
 
   const chatHistoryEl = (typeof domQuery === "function" && domQuery("chatHistory")) || document;
@@ -477,13 +490,51 @@ function sgScanConversationTurns() {
 
   if (containers.length > 0) {
     containers = containers.filter((el, idx, arr) => !arr.some((other, j) => idx !== j && other.contains(el)));
+    const lastIdx = containers.length - 1;
     containers.forEach((container, idx) => {
       const userEl = container.querySelector('user-query, .user-message, [data-message-author="user"], .query-content');
       const modelEl = container.querySelector('model-response, .model-response, [data-message-author="model"]');
       const responseId = (container.id && container.id.trim()) || (modelEl && typeof sgGetTurnId === "function" ? sgGetTurnId(modelEl) : null) || null;
+      const modelChildCount = modelEl && modelEl.children ? modelEl.children.length : 0;
+      const userChildCount = userEl && userEl.children ? userEl.children.length : 0;
+
+      if (!force && _sgOutlineMutationObserver && idx < lastIdx && !_sgOutlineDirtyContainers.has(container)) {
+        const cached = _sgOutlineSettledTurnCache.get(container);
+        if (cached &&
+            cached.userEl === userEl &&
+            cached.modelEl === modelEl &&
+            cached.responseId === responseId &&
+            cached.modelChildCount === modelChildCount &&
+            cached.userChildCount === userChildCount) {
+          domTurns.push({
+            key: responseId || `dom-idx-${idx}`,
+            responseId,
+            containerEl: container,
+            userEl,
+            modelEl,
+            userText: cached.userText,
+            headings: cached.headings,
+            assets: cached.assets,
+            inDom: true
+          });
+          return;
+        }
+      }
+
       const userText = userEl ? sgReadCleanUserQueryText(userEl) : "";
       const headings = modelEl ? sgExtractHeadingItems(modelEl) : [];
       const assets = sgExtractTurnAssets(userEl, modelEl);
+      _sgOutlineSettledTurnCache.set(container, {
+        userEl,
+        modelEl,
+        responseId,
+        modelChildCount,
+        userChildCount,
+        userText,
+        headings,
+        assets
+      });
+      _sgOutlineDirtyContainers.delete(container);
       domTurns.push({
         key: responseId || `dom-idx-${idx}`,
         responseId,
@@ -2594,8 +2645,12 @@ function sgOpenForkHandoffModalFromResponse(modelEl) {
 
 function sgInjectForkButton(modelEl) {
   if (!isExtensionEnabled || !isForkHandoffEnabled || !modelEl) return;
+  if (_sgForkInjectedResponses.has(modelEl) && modelEl.isConnected) return;
   if (sgShouldSuppressOutlineSurface()) return;
-  if (modelEl.querySelector(".sg-fork-turn-btn")) return;
+  if (modelEl.querySelector(".sg-fork-turn-btn")) {
+    _sgForkInjectedResponses.add(modelEl);
+    return;
+  }
   const bar = typeof findMessageActionsBar === "function" ? findMessageActionsBar(modelEl) : null;
   if (!bar) return;
 
@@ -2620,14 +2675,16 @@ function sgInjectForkButton(modelEl) {
   } else {
     bar.appendChild(btn);
   }
+  _sgForkInjectedResponses.add(modelEl);
 }
 
 function sgRemoveAllForkButtons() {
   document.querySelectorAll(".sg-fork-turn-btn").forEach(btn => btn.remove());
+  _sgForkInjectedResponses = new WeakSet();
 }
 
 function sgRefreshOutlineAndForkUi(force = false) {
-  const turns = sgScanConversationTurns();
+  const turns = sgScanConversationTurns(force);
   sgRenderOutline(turns, force);
   sgAttachOutlineScrollSpy();
   if (isForkHandoffEnabled && !sgShouldSuppressOutlineSurface()) {
@@ -2676,7 +2733,16 @@ function sgEnsureChatMutationObserver() {
   }
   _sgOutlineObservedChatEl = ch;
   if (!ch) return;
-  _sgOutlineMutationObserver = new MutationObserver(() => {
+  _sgOutlineMutationObserver = new MutationObserver(records => {
+    if (Array.isArray(records)) {
+      for (const rec of records) {
+        if (!rec) continue;
+        sgOutlineMarkTurnDirty(rec.target);
+        if (rec.addedNodes) {
+          for (const n of rec.addedNodes) sgOutlineMarkTurnDirty(n);
+        }
+      }
+    }
     sgScheduleOutlineRefresh(false);
   });
   _sgOutlineMutationObserver.observe(ch, { childList: true, subtree: true });

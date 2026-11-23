@@ -47,11 +47,13 @@ const SG_DIAGRAM_LABELS = Object.freeze({
   netlist: "NetlistSVG"
 });
 
+const SG_DIAGRAM_LAZY_MARGIN_PX = 350;
 let isDiagramRendererEnabled = true;
 let _sgDiagramInitialized = false;
 let _sgDiagramMessageBound = false;
 let _sgSvgSourceListenerBound = false;
 let _sgDiagramThemeObserver = null;
+let _sgDiagramIntersectionObserver = null;
 let _sgDiagramLastTheme = null;
 let _sgDiagramExportSeq = 0;
 let _sgDiagramFullscreenState = null;
@@ -60,6 +62,7 @@ const _sgDiagramEntries = new Map();
 const _sgDiagramEntriesByToken = new Map();
 const _sgDiagramPendingExports = new Map();
 const _sgSvgBlockSources = new Map();
+let _sgDiagramNonDiagramCache = new WeakSet();
 
 function sgDiagramGetExtOrigin() {
   try {
@@ -860,12 +863,122 @@ function sgDiagramDispatchRender(entry, engine, source, hash) {
   }
 }
 
+function sgDiagramIsNearViewport(el) {
+  if (!el || typeof el.getBoundingClientRect !== "function" || typeof window === "undefined") {
+    return true;
+  }
+  const rect = el.getBoundingClientRect();
+  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0 && rect.width === 0)) {
+    return true;
+  }
+  const vh = window.innerHeight || 900;
+  return rect.bottom >= -SG_DIAGRAM_LAZY_MARGIN_PX && rect.top <= vh + SG_DIAGRAM_LAZY_MARGIN_PX;
+}
+
+function sgDiagramEnsureIntersectionObserver() {
+  if (_sgDiagramIntersectionObserver) return _sgDiagramIntersectionObserver;
+  if (typeof IntersectionObserver !== "function") return null;
+  _sgDiagramIntersectionObserver = new IntersectionObserver((entries) => {
+    for (const io of entries) {
+      if (io && io.isIntersecting && io.target) {
+        sgDiagramActivateDeferredEntry(io.target);
+      }
+    }
+  }, { rootMargin: `${SG_DIAGRAM_LAZY_MARGIN_PX}px 0px` });
+  return _sgDiagramIntersectionObserver;
+}
+
+function sgDiagramMountLazyPlaceholder(codeBlock, engine, isNativeSvgBlock) {
+  const placeholder = document.createElement("div");
+  placeholder.className = "sg-diagram-lazy-placeholder";
+
+  const meta = document.createElement("div");
+  meta.className = "sg-diagram-lazy-meta";
+
+  const badge = document.createElement("span");
+  badge.className = "sg-diagram-badge";
+  badge.textContent = SG_DIAGRAM_LABELS[engine] || engine;
+
+  const note = document.createElement("span");
+  note.textContent = "Diagram paused off-screen";
+
+  meta.appendChild(badge);
+  meta.appendChild(note);
+
+  const renderBtn = document.createElement("button");
+  renderBtn.type = "button";
+  renderBtn.className = "sg-diagram-btn";
+  renderBtn.textContent = "Render now";
+  renderBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sgDiagramActivateDeferredEntry(codeBlock);
+  });
+
+  placeholder.appendChild(meta);
+  placeholder.appendChild(renderBtn);
+
+  if (isNativeSvgBlock) {
+    const svgPreview = codeBlock.querySelector(".svg-preview");
+    if (svgPreview && svgPreview.parentNode) {
+      svgPreview.parentNode.insertBefore(placeholder, svgPreview);
+    } else {
+      const innerWrap = codeBlock.querySelector(".svg-code-block") || codeBlock;
+      innerWrap.appendChild(placeholder);
+    }
+  } else {
+    const codeContainer = codeBlock.querySelector(".formatted-code-block-internal-container") || codeBlock.querySelector("pre");
+    if (codeContainer && codeContainer.parentNode) {
+      codeContainer.parentNode.insertBefore(placeholder, codeContainer);
+    } else {
+      codeBlock.appendChild(placeholder);
+    }
+  }
+  return placeholder;
+}
+
+function sgDiagramActivateDeferredEntry(codeBlock) {
+  const entry = _sgDiagramEntries.get(codeBlock);
+  if (!entry || !entry.deferred || !entry.deferredData) return;
+  if (_sgDiagramIntersectionObserver) {
+    try { _sgDiagramIntersectionObserver.unobserve(codeBlock); } catch (_e) {}
+  }
+  if (entry.placeholderEl && entry.placeholderEl.parentNode) {
+    entry.placeholderEl.remove();
+  }
+  entry.placeholderEl = null;
+  const deferredData = entry.deferredData;
+  entry.deferred = false;
+  entry.deferredData = null;
+
+  if (!isExtensionEnabled || !isDiagramRendererEnabled || !codeBlock || !codeBlock.isConnected) {
+    sgDiagramRemoveEntry(codeBlock);
+    return;
+  }
+  const activeEntry = sgMountDiagramHost(codeBlock, deferredData.engine, deferredData.isNativeSvgBlock);
+  if (activeEntry.renderedHash === deferredData.hash && activeEntry.engine === deferredData.engine) {
+    return;
+  }
+  sgDiagramDispatchRender(activeEntry, deferredData.engine, deferredData.source, deferredData.hash);
+}
+
+function sgDiagramFlushAllDeferred() {
+  for (const [cb, entry] of Array.from(_sgDiagramEntries.entries())) {
+    if (entry && entry.deferred) {
+      sgDiagramActivateDeferredEntry(cb);
+    }
+  }
+}
+
 function sgDiagramScheduleBlockRender(codeBlock, engine, source, isNativeSvgBlock) {
   const nativeSvg = Boolean(isNativeSvgBlock);
   const hash = `${engine}:${sgDiagramHashText(source)}`;
   let entry = _sgDiagramEntries.get(codeBlock);
 
   if (entry && entry.renderedHash === hash && entry.engine === engine) {
+    return;
+  }
+  if (entry && entry.deferred && entry.deferredData && entry.deferredData.hash === hash && entry.engine === engine) {
     return;
   }
 
@@ -886,7 +999,10 @@ function sgDiagramScheduleBlockRender(codeBlock, engine, source, isNativeSvgBloc
       pendingHash: null,
       renderedHash: null,
       debounceTimer: null,
-      mounted: false
+      mounted: false,
+      deferred: false,
+      deferredData: null,
+      placeholderEl: null
     };
     _sgDiagramEntries.set(codeBlock, entry);
   }
@@ -913,6 +1029,53 @@ function sgDiagramScheduleBlockRender(codeBlock, engine, source, isNativeSvgBloc
     const latestHash = `${latestEngine}:${sgDiagramHashText(latestSource)}`;
 
     let activeEntry = _sgDiagramEntries.get(codeBlock);
+    if ((!activeEntry || !activeEntry.token) && typeof IntersectionObserver === "function" && !sgDiagramIsNearViewport(codeBlock)) {
+      if (!activeEntry) {
+        activeEntry = {
+          token: null,
+          engine: latestEngine,
+          isNativeSvgBlock: nativeSvg,
+          codeBlock,
+          pendingHash: null,
+          renderedHash: null,
+          debounceTimer: null,
+          mounted: false,
+          deferred: false,
+          deferredData: null,
+          placeholderEl: null
+        };
+        _sgDiagramEntries.set(codeBlock, activeEntry);
+      }
+      if (activeEntry.placeholderEl && activeEntry.engine !== latestEngine) {
+        const badgeEl = activeEntry.placeholderEl.querySelector(".sg-diagram-badge");
+        if (badgeEl) badgeEl.textContent = SG_DIAGRAM_LABELS[latestEngine] || latestEngine;
+      }
+      if (!activeEntry.placeholderEl || !activeEntry.placeholderEl.isConnected) {
+        activeEntry.placeholderEl = sgDiagramMountLazyPlaceholder(codeBlock, latestEngine, nativeSvg);
+      }
+      activeEntry.engine = latestEngine;
+      activeEntry.deferred = true;
+      activeEntry.deferredData = {
+        engine: latestEngine,
+        source: latestSource,
+        hash: latestHash,
+        isNativeSvgBlock: nativeSvg
+      };
+      const io = sgDiagramEnsureIntersectionObserver();
+      if (io) io.observe(codeBlock);
+      return;
+    }
+
+    if (activeEntry && activeEntry.placeholderEl) {
+      if (_sgDiagramIntersectionObserver) {
+        try { _sgDiagramIntersectionObserver.unobserve(codeBlock); } catch (_e) {}
+      }
+      if (activeEntry.placeholderEl.parentNode) activeEntry.placeholderEl.remove();
+      activeEntry.placeholderEl = null;
+      activeEntry.deferred = false;
+      activeEntry.deferredData = null;
+    }
+
     if (!activeEntry || !activeEntry.token) {
       activeEntry = sgMountDiagramHost(codeBlock, latestEngine, nativeSvg);
     }
@@ -926,6 +1089,12 @@ function sgDiagramScheduleBlockRender(codeBlock, engine, source, isNativeSvgBloc
 function sgDiagramRemoveEntry(codeBlock) {
   const entry = _sgDiagramEntries.get(codeBlock);
   if (!entry) return;
+  if (_sgDiagramIntersectionObserver) {
+    try { _sgDiagramIntersectionObserver.unobserve(codeBlock); } catch (_e) {}
+  }
+  if (entry.placeholderEl && entry.placeholderEl.parentNode) {
+    entry.placeholderEl.remove();
+  }
   if (entry.debounceTimer) {
     clearTimeout(entry.debounceTimer);
     entry.debounceTimer = null;
@@ -957,18 +1126,39 @@ function sgDiagramPruneDisconnected() {
 function sgRefreshDiagramRenderer() {
   if (typeof document === "undefined" || !isExtensionEnabled || !isDiagramRendererEnabled) return;
   sgDiagramPruneDisconnected();
+  const responses = document.querySelectorAll("model-response");
+  const lastResponse = responses && responses.length > 0 ? responses[responses.length - 1] : null;
+
   const blocks = document.querySelectorAll("code-block");
   for (const cb of blocks) {
     if (typeof cb.closest === "function" && cb.closest('[id^="sg-"]')) continue;
+    const mr = typeof cb.closest === "function" ? cb.closest("model-response") : null;
+    const isSettledOlderTurn = Boolean(mr && lastResponse && mr !== lastResponse);
+    if (isSettledOlderTurn) {
+      if (_sgDiagramNonDiagramCache.has(cb)) continue;
+      const existing = _sgDiagramEntries.get(cb);
+      if (existing && (existing.renderedHash || existing.deferred)) continue;
+    }
     const source = typeof sgGetCodeBlockSource === "function" ? sgGetCodeBlockSource(cb) : "";
     if (!source || !source.trim()) continue;
     const engine = sgDetectDiagramEngine(cb, source);
-    if (!engine) continue;
+    if (!engine) {
+      if (isSettledOlderTurn && !sgDiagramIsBlockStreaming(cb)) {
+        _sgDiagramNonDiagramCache.add(cb);
+      }
+      continue;
+    }
     sgDiagramScheduleBlockRender(cb, engine, source, false);
   }
   const svgBlocks = document.querySelectorAll("svg-code-block");
   for (const sb of svgBlocks) {
     if (typeof sb.closest === "function" && sb.closest('[id^="sg-"]')) continue;
+    const mr = typeof sb.closest === "function" ? sb.closest("model-response") : null;
+    const isSettledOlderTurn = Boolean(mr && lastResponse && mr !== lastResponse);
+    if (isSettledOlderTurn) {
+      const existing = _sgDiagramEntries.get(sb);
+      if (existing && (existing.renderedHash || existing.deferred)) continue;
+    }
     const source = sgDiagramGetSvgBlockSource(sb);
     if (!source || !source.trim()) continue;
     sgDiagramScheduleBlockRender(sb, "svg", source, true);
@@ -1100,6 +1290,11 @@ function sgTeardownDiagramRenderer() {
     _sgDiagramThemeObserver.disconnect();
     _sgDiagramThemeObserver = null;
   }
+  if (_sgDiagramIntersectionObserver) {
+    _sgDiagramIntersectionObserver.disconnect();
+    _sgDiagramIntersectionObserver = null;
+  }
+  _sgDiagramNonDiagramCache = new WeakSet();
   if (typeof sgObserverRegistry !== "undefined" && sgObserverRegistry.unregisterUIRefresh) {
     sgObserverRegistry.unregisterUIRefresh("diagramRenderer");
   }

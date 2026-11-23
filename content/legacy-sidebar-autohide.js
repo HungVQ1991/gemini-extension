@@ -482,14 +482,42 @@ function sgNativeFormConverged() {
   return !0
 }
 let _sgReinjectTimers = [],
-  _sgReinjectPoll = null;
+  _sgReinjectPoll = null,
+  _sgReinjectPendingOnVisible = !1,
+  _sgReinjectVisBound = !1;
+
+function sgEnsureReinjectVisibilityListener() {
+  if (_sgReinjectVisBound || SG_IS_SILENT_BG_WORKER_TAB) return;
+  _sgReinjectVisBound = !0;
+  "undefined" != typeof document && "function" == typeof document.addEventListener && document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && _sgReinjectPendingOnVisible) {
+      _sgReinjectPendingOnVisible = !1;
+      sgScheduleNativeReinject();
+    }
+  });
+}
 
 function sgScheduleNativeReinject() {
-  _sgReinjectTimers.forEach(e => clearTimeout(e)), _sgReinjectTimers = [], [50, 200, 500, 1e3].forEach(e => {
+  if (SG_IS_SILENT_BG_WORKER_TAB) return;
+  sgEnsureReinjectVisibilityListener();
+  _sgReinjectTimers.forEach(e => clearTimeout(e)), _sgReinjectTimers = [];
+  _sgReinjectPoll && (clearInterval(_sgReinjectPoll), _sgReinjectPoll = null);
+  if ("undefined" != typeof document && document.hidden) {
+    _sgReinjectPendingOnVisible = !0;
+    return;
+  }
+  _sgReinjectPendingOnVisible = !1;
+  [50, 200, 500, 1e3].forEach(e => {
     _sgReinjectTimers.push(setTimeout(() => sgInjectNativeMenu(), e))
-  }), _sgReinjectPoll && clearInterval(_sgReinjectPoll);
+  });
   const e = Date.now();
   _sgReinjectPoll = setInterval(() => {
+    if ("undefined" != typeof document && document.hidden) {
+      clearInterval(_sgReinjectPoll);
+      _sgReinjectPoll = null;
+      _sgReinjectPendingOnVisible = !0;
+      return;
+    }
     sgInjectNativeMenu(), (sgNativeFormConverged() || Date.now() - e > 6e3) && (clearInterval(_sgReinjectPoll), _sgReinjectPoll = null)
   }, 300)
 }
